@@ -2,18 +2,20 @@ from typing import List, Optional
 import json
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, UploadFile, File
 from datetime import datetime
+from sqlalchemy import select
 from app.dependencies.rate_limiter import limiter
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.incidents_services import get_incidents_by_barangay, get_incident_by_id, mark_incident_as_viewed, get_all_incidents
+from app.services.incidents_services import get_incidents_by_barangay, get_incident_by_id, mark_incident_as_viewed, get_all_incidents, get_assigned_incidents_for_barangay_member, mark_incident_as_unresolvable
 from app.dependencies.auth_dependency import get_current_user
-from app.services.complaint_services import get_complaints_by_incident, notify_user_for_hearing, reschedule_hearing, mark_hearing_as_successful
+from app.services.complaint_services import get_complaints_by_incident
+from app.services.hearing_services import notify_user_for_hearing, mark_hearing_as_successful, reschedule_hearing
 from app.services.hearing_services import get_scheduled_hearings
-from app.services.incidents_services import forward_incident_to_lgu
-from app.services.complaint_actions_services import resolve_complaints_by_incident, review_complaints_by_incident, reject_complaints_by_incident, reject_incident
+from app.services.complaint_actions_services import resolve_complaints_by_incident, review_complaints_by_incident, reject_complaints_by_incident, reject_incident, forward_incident_to_lgu
 from app.dependencies.db_dependency import get_async_db
 from app.constants.roles import UserRole
 from app.schemas.response_schema import ResponseCreateSchema, RejectComplaintSchema
 from app.models.user import User
+from app.models.incident_model import incident_barangay_members
 from app.schemas.hearing_schema import RespondentsModel
 from app.utils.logger import logger
 from app.core.pagination_params import IncidentListParams, ListParams, PaginationParams
@@ -52,7 +54,21 @@ def parse_response_data(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail="Missing response data.",
     )
-    
+
+
+async def verify_member_incident_assignment(incident_id: int, current_user: User, db: AsyncSession) -> None:
+    if current_user.role != UserRole.BARANGAY_MEMBER:
+        return
+    if not current_user.barangay_member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Barangay member account is required.")
+    assigned = await db.execute(
+        select(incident_barangay_members.c.incident_id).where(
+            incident_barangay_members.c.incident_id == incident_id,
+            incident_barangay_members.c.barangay_member_id == current_user.barangay_member.id,
+        )
+    )
+    if assigned.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found.")
 
 @router.get("/", status_code=status.HTTP_200_OK)
 async def get_incidents(params: IncidentListParams = Depends(), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
@@ -70,6 +86,12 @@ async def get_all_incidents_endpoint(params: IncidentListParams = Depends(), db:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this resource.")
 
     return await get_all_incidents(current_user, db, params)
+
+@router.get("/assigned", status_code=status.HTTP_200_OK)
+async def get_assigned_incidents_endpoint(params: IncidentListParams = Depends(), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.BARANGAY_MEMBER or not current_user.barangay_member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Assigned incidents are only available to barangay members.")
+    return await get_assigned_incidents_for_barangay_member(current_user.barangay_member.id, db, params)
 
 @router.get("/scheduled-hearings", status_code=status.HTTP_200_OK)
 async def get_scheduled_hearings_endpoint(
@@ -94,18 +116,22 @@ async def get_scheduled_hearings_endpoint(
 @router.get("/{incident_id}", status_code=status.HTTP_200_OK)
 async def get_incident(incident_id: int, db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     
-    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.LGU_OFFICIAL]:
+    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.BARANGAY_MEMBER, UserRole.LGU_OFFICIAL]:
         logger.warning(f"Unauthorized access attempt by user ID: {current_user.id} with role: {current_user.role}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this resource.")
+
+    await verify_member_incident_assignment(incident_id, current_user, db)
     
     return await get_incident_by_id(incident_id, db)
     
 @router.get("/{incident_id}/complaints", status_code=status.HTTP_200_OK)
 async def get_incident_complaints(incident_id: int, params: PaginationParams = Depends(), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     
-    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.LGU_OFFICIAL]:
+    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.BARANGAY_MEMBER, UserRole.LGU_OFFICIAL]:
         logger.warning(f"Unauthorized access attempt by user ID: {current_user.id} with role: {current_user.role}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this resource.")
+
+    await verify_member_incident_assignment(incident_id, current_user, db)
     
     return await get_complaints_by_incident(incident_id, db, params)
 
@@ -121,12 +147,33 @@ async def resolve_incident_complaints(
     current_user: User = Depends(get_current_user)
 ):
     
-    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.LGU_OFFICIAL]:
+    if current_user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.BARANGAY_MEMBER, UserRole.LGU_OFFICIAL]:
         logger.warning(f"Unauthorized access attempt by user ID: {current_user.id} with role: {current_user.role}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this resource.")
+
+    if current_user.role == UserRole.BARANGAY_MEMBER:
+        await verify_member_incident_assignment(incident_id, current_user, db)
     
     response_payload = parse_response_data(response_data, actions_taken)
     return await resolve_complaints_by_incident(response_payload, incident_id, current_user.id, attachments=attachments, db=db)
+
+
+@router.patch("/{incident_id}/unresolvable", status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+async def mark_incident_unresolvable(
+    request: Request,
+    incident_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != UserRole.BARANGAY_MEMBER or not current_user.barangay_member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only assigned barangay members may mark an incident as unresolvable.")
+
+    return await mark_incident_as_unresolvable(
+        incident_id,
+        db,
+        barangay_member_id=current_user.barangay_member.id,
+    )
 
 @router.patch("/{incident_id}/review", status_code=status.HTTP_200_OK)
 @limiter.limit("10/minute")

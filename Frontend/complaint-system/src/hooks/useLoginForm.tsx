@@ -25,6 +25,10 @@ export const useLoginForm = () => {
     onSuccess: (data) => {
       console.log("Login successful");
       const role = data?.role;
+      if (role === 'barangay_member') {
+        navigate("/member/assigned-incidents");
+        return;
+      }
       if (role === 'lgu_official') {
         navigate("/lgu/dashboard");
         return;

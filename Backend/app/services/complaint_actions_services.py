@@ -4,16 +4,15 @@ from fastapi import HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.response_schema import ResponseCreateSchema, RejectComplaintSchema
 from app.models.rejection_categories import RejectionCategory as RejectionCategoryModel
-from app.models.incident_model import IncidentModel
-from app.schemas.web_push_schema import PushNotificationPayload
+from app.models.incident_model import IncidentModel, incident_barangay_members
 from app.models.complaint import Complaint
 from app.models.incident_complaint import IncidentComplaintModel
 from app.models.barangay_account import BarangayAccount
 from app.models.user import User
+from app.utils.cache_invalidator_optimized import CacheInvalidator, invalidate_cache
 from app.constants.complaint_status import ComplaintStatus
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
-from app.services.web_push_services import send_web_push_notification
 from app.utils.cache_invalidator_optimized import invalidate_cache
 from app.tasks.notification_tasks import send_notifications_task, send_push_notification_task, send_web_push_notification_task
 from app.models.response import Response
@@ -75,7 +74,7 @@ async def review_complaints_by_incident(response_data: ResponseCreateSchema, inc
             db=db
         )
         
-        assign_barangay_members_task.delay(complaint_ids=complaint_ids, barangay_member_ids=response_data.barangay_member_ids)
+        assign_barangay_members_task.delay(incident_id=incident_id, complaint_ids=complaint_ids, barangay_member_ids=response_data.barangay_member_ids)
 
         await db.commit()
         
@@ -213,17 +212,30 @@ async def resolve_complaints_by_incident(response_data: ResponseCreateSchema, in
         await db.execute(
             update(Complaint)
             .where(Complaint.id.in_(complaint_ids))
-            .values(status=ComplaintStatus.RESOLVED_BY_BARANGAY.value if resolver.role == UserRole.BARANGAY_OFFICIAL else ComplaintStatus.RESOLVED_BY_LGU.value, resolved_at=datetime.now(timezone.utc))
+            .values(status=ComplaintStatus.RESOLVED_BY_BARANGAY.value if resolver.role in [UserRole.BARANGAY_OFFICIAL, UserRole.BARANGAY_MEMBER] else ComplaintStatus.RESOLVED_BY_LGU.value, resolved_at=datetime.now(timezone.utc))
         )
         
         await log_status_change(
             complaint_ids=complaint_ids,
-            new_status=ComplaintStatus.RESOLVED_BY_BARANGAY.value if resolver.role == UserRole.BARANGAY_OFFICIAL else ComplaintStatus.RESOLVED_BY_LGU.value,
+            new_status=ComplaintStatus.RESOLVED_BY_BARANGAY.value if resolver.role in [UserRole.BARANGAY_OFFICIAL, UserRole.BARANGAY_MEMBER] else ComplaintStatus.RESOLVED_BY_LGU.value,
             changed_by_user_id=responder_id,
             db=db
         )
 
-        assign_barangay_members_task.delay(complaint_ids=complaint_ids, barangay_member_ids=response_data.barangay_member_ids)
+        response_barangay_member_ids = response_data.barangay_member_ids or []
+        if resolver.role == UserRole.BARANGAY_MEMBER:
+            assigned_members_result = await db.execute(
+                select(incident_barangay_members.c.barangay_member_id).where(
+                    incident_barangay_members.c.incident_id == incident_id
+                )
+            )
+            response_barangay_member_ids = assigned_members_result.scalars().all()
+        else:
+            assign_barangay_members_task.delay(
+                incident_id=incident_id,
+                complaint_ids=complaint_ids,
+                barangay_member_ids=response_barangay_member_ids,
+            )
             
         await db.commit()
     
@@ -234,7 +246,7 @@ async def resolve_complaints_by_incident(response_data: ResponseCreateSchema, in
             response_date=datetime.now(timezone.utc),
         )
         db.add(response)
-        await assign_barangay_members_to_response(db, response, response_data.barangay_member_ids)
+        await assign_barangay_members_to_response(db, response, response_barangay_member_ids)
         await db.commit()
         await db.refresh(response)
 
@@ -417,7 +429,7 @@ async def reject_complaints_by_incident(incident_id: int, rejector_id: int, resp
                 db=db
             )
 
-        assign_barangay_members_task.delay(complaint_ids=complaint_ids, barangay_member_ids=response_data.barangay_member_ids)
+        assign_barangay_members_task.delay(incident_id=incident_id, complaint_ids=complaint_ids, barangay_member_ids=response_data.barangay_member_ids)
         
         response = Response(
             incident_id=incident_id,
@@ -756,4 +768,145 @@ async def reject_incident(incident_id: int, rejector_id: int, response_data: Res
         await db.rollback()
         logger.error(f"Error in reject_complaints_by_incident: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    
+    
+   
+async def forward_incident_to_lgu(response_data: ResponseCreateSchema, incident_id: int, responder_id: int, attachments: Optional[List[UploadFile]], db: AsyncSession):
+    try:
+        if not attachments:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Attachments are required when escalating an incident",
+            )
+
+        incident_result = await db.execute(select(IncidentModel).where(IncidentModel.id == incident_id))
+        incident = incident_result.scalars().first()
+        
+        if not incident:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        
+        
+        barangay_id = incident.barangay_id
+        
+        result = await db.execute(select(IncidentComplaintModel.complaint_id).where(IncidentComplaintModel.incident_id == incident_id))
+        
+        complaint_ids = result.scalars().all()
+        
+        if not complaint_ids:
+            return {"message": "No complaints found for this incident"}
+        
+        result = await db.execute(select(Complaint).where(Complaint.id.in_(complaint_ids)))
+        complaints = result.scalars().all()
+        
+        if complaints[0].is_rejected_by_lgu:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot forward incident. You cannot forward an incident that has been rejected by the LGU.")
+        
+        await db.execute(
+            update(Complaint)   
+            .where(Complaint.id.in_(complaint_ids))
+            .values(
+                status=ComplaintStatus.FORWARDED_TO_LGU.value,
+                forwarded_at=datetime.now(timezone.utc),
+                is_rejected_by_lgu=False
+            )
+        )
+        
+        await log_status_change(
+            complaint_ids=complaint_ids,
+            new_status=ComplaintStatus.FORWARDED_TO_LGU.value,
+            changed_by_user_id=responder_id,
+            db=db
+        )
+        logger.info(f"Updated {len(complaint_ids)} complaints to FORWARDED_TO_LGU status for incident ID: {incident_id}")
+        incident.new_complaint_count = len(complaint_ids)
+        incident.has_new_complaints = True
+        incident.updated_at = datetime.now(timezone.utc)
+        if incident.hearing_date:
+            incident.hearing_date = None
+        await db.commit()
+        
+        # OPTIMIZED: Batch fetch all complaints at once instead of in loop
+        complaints_dict = await BatchLoader.fetch_complaints_by_ids(db, complaint_ids, minimal=True)
+        
+        # Send notifications using cached complaints
+        for complaint_id in complaint_ids:
+            complaint = complaints_dict.get(complaint_id)
+            if complaint:
+                send_notifications_task.delay(
+                    user_id=complaint.user_id,
+                    title="Complaint Forwarded to LGU",
+                    incident_id=incident_id,
+                    message="Your complaint has been forwarded to the LGU for further processing.",
+                    complaint_id=complaint.id,
+                    notification_type="update",
+                    event="info"
+                )
+                
+        response = Response(
+            incident_id=incident_id,
+            responder_id=responder_id,
+            actions_taken=response_data.actions_taken,
+            response_date=datetime.now(timezone.utc),
+        )
+        db.add(response)
+        await db.commit()
+        await db.refresh(response)
+
+        if attachments:
+            await enqueue_response_attachments(attachments, response.id, responder_id, incident_id)
+        
+        result = await db.execute(
+            select(User).options(selectinload(User.push_subscriptions)).where(User.role == "lgu_official")
+        )
+        lgu_officials = result.scalars().all()
+
+        for official in lgu_officials:
+            send_notifications_task.delay(
+                user_id=official.id,
+                title="New Incident Forwarded to LGU",
+                message=f"A new incident with ID {incident.id} has been forwarded to the LGU.",
+                complaint_id=None,
+                incident_id=incident_id,
+                notification_type="info",
+                event="info"
+            )
+
+            payload = {
+                "title": "New Incident Forwarded to LGU",
+                "body": f"A new incident with ID {incident.id} has been forwarded to the LGU.",
+                "icon": "https://cfms-stamaria.com/StaMariaLogo.jpg",
+                "url": f"https://cfms-stamaria.com/lgu/incidents/{incident.id}"
+            }
+
+            send_web_push_notification_task.delay(
+                user_id=official.id,
+                payload=payload
+            )
+
+            incident.lgu_account_id = official.id
+
+        await db.commit()
+            
+        # OPTIMIZED: Use new CacheInvalidator with pipeline
+        await CacheInvalidator.invalidate_cache(
+            complaint_ids=complaint_ids,
+            user_ids=await BatchLoader.fetch_user_ids_for_complaints(db, complaint_ids),
+            barangay_id=barangay_id,
+            incident_ids=[incident_id],
+            include_global=True
+        )
+            
+            
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"message": "All complaints under this incident have been forwarded to LGU"}
+        )
+        
+    except HTTPException:
+        raise
+    
+    except Exception:
+        await db.rollback()
+        logger.exception("Error in forward_incident_to_lgu")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
     

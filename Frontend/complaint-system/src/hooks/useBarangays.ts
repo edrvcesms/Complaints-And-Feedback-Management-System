@@ -1,6 +1,6 @@
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
-import { addBarangayMember, getAllBarangays, getBarangayById, getBarangayMembers, markBarangayIncidentsViewed, removeBarangayMember } from "../services/barangay/barangays";
-import type { BarangayMember } from "../services/barangay/barangays";
+import { addBarangayMember, getAllBarangays, getBarangayById, getBarangayMembers, getMyBarangayDuty, getOnDutyBarangayMembers, markBarangayIncidentsViewed, removeBarangayMember, updateMyBarangayDuty } from "../services/barangay/barangays";
+import type { BarangayDutyUpdate, BarangayMember, BarangayMemberDuty, OnDutyBarangayMember } from "../services/barangay/barangays";
 import type { BarangayAccountData } from "../types/barangay/barangayAccount";
 import type { PaginatedResponse } from "../types/general/pagination";
 import type { PaginationQueryParams } from "../types/general/pagination";
@@ -47,11 +47,12 @@ export const useMarkBarangayViewed = () => {
   });
 };
 
-export const useBarangayMembers = (barangayId?: number) => {
+export const useBarangayMembers = (barangayId?: number, onDutyOnly = false) => {
   const { data, isLoading, error, refetch } = useQuery<BarangayMember[]>({
-    queryKey: ["barangayMembers", barangayId],
-    queryFn: () => getBarangayMembers(barangayId as number),
+    queryKey: ["barangayMembers", barangayId, onDutyOnly],
+    queryFn: () => getBarangayMembers(barangayId as number, onDutyOnly),
     enabled: !!barangayId,
+    refetchInterval: onDutyOnly ? 60_000 : false,
   });
 
   return {
@@ -62,8 +63,46 @@ export const useBarangayMembers = (barangayId?: number) => {
   };
 };
 
+export const useOnDutyBarangayMembers = (barangayId?: number) => {
+  const { data, isLoading, error, refetch } = useQuery<OnDutyBarangayMember[]>({
+    queryKey: ["onDutyBarangayMembers", barangayId],
+    queryFn: () => getOnDutyBarangayMembers(barangayId as number),
+    enabled: !!barangayId,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  return {
+    members: data ?? [],
+    isLoading,
+    error,
+    refetch,
+  };
+};
+
+export const useMyBarangayDuty = (enabled = true) => {
+  const { data, isLoading, error } = useQuery<BarangayMemberDuty>({
+    queryKey: ["myBarangayDuty"],
+    queryFn: getMyBarangayDuty,
+    enabled,
+    refetchOnMount: "always",
+  });
+
+  return { duty: data, isLoading, error };
+};
+
+export const useUpdateMyBarangayDuty = () => useMutation({
+  mutationFn: (duty: BarangayDutyUpdate) => updateMyBarangayDuty(duty),
+  onSuccess: (duty) => {
+    queryClient.setQueryData(["myBarangayDuty"], duty);
+    queryClient.invalidateQueries({ queryKey: ["onDutyBarangayMembers"] });
+    queryClient.invalidateQueries({ queryKey: ["barangayMembers"] });
+  },
+});
+
 export const useAddBarangayMember = (barangayId: number) => useMutation({
-  mutationFn: (payload: { name: string; position: string }) => addBarangayMember(barangayId, payload),
+  mutationFn: (payload: { name: string; position: string; email: string; password: string }) => addBarangayMember(barangayId, payload),
   onSuccess: () => queryClient.invalidateQueries({ queryKey: ["barangayMembers", barangayId] }),
 });
 

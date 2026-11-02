@@ -37,6 +37,16 @@ export const getAllIncidents = async (params?: IncidentQueryParams): Promise<Pag
   };
 };
 
+export const getAssignedIncidents = async (params?: IncidentQueryParams): Promise<PaginatedResponse<Incident>> => {
+  try {
+    const queryString = buildQueryString(params || {});
+    return await incidentsApi.get(`/assigned?${queryString}`);
+  } catch (error) {
+    console.error("Error fetching assigned incidents:", error);
+    throw error;
+  }
+};
+
 export const getIncidentById = async (incidentId: number): Promise<Incident> => {
   try {
     return await incidentsApi.get(`/${incidentId}`);
@@ -67,6 +77,15 @@ export const resolveIncident = async (
     await incidentsApi.patch(`/${incidentId}/resolve`, formData);
   } catch (error) {
     console.error("Error resolving incident:", error);
+    throw error;
+  }
+};
+
+export const markIncidentUnresolvable = async (incidentId: number): Promise<{ message: string }> => {
+  try {
+    return await incidentsApi.patch(`/${incidentId}/unresolvable`);
+  } catch (error) {
+    console.error("Error marking incident as unresolvable:", error);
     throw error;
   }
 };

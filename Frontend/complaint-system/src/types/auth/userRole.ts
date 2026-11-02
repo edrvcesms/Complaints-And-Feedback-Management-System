@@ -1,2 +1,2 @@
 
-export type UserRole = 'barangay_official' | 'lgu_official'| 'superadmin' | 'user';
+export type UserRole = 'barangay_official' | 'barangay_member' | 'lgu_official' | 'superadmin' | 'user';

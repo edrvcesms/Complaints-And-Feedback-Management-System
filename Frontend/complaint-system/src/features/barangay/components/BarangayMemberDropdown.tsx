@@ -54,7 +54,7 @@ export const BarangayMemberDropdown: React.FC<BarangayMemberDropdownProps> = ({
                   key={member.id}
                   className="inline-flex items-center rounded-md bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700"
                 >
-                  {member.name}
+                  {member.name} · {member.position}
                 </span>
               ))}
 

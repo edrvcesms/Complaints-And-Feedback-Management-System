@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from "react-router-dom";
 import { useIncidentDetails } from "../../../hooks/useIncidents";
-import { ArrowLeft, AlertCircle, MapPin, Users, Play, X, Image as ImageIcon, FileText } from "lucide-react";
+import { ArrowLeft, AlertCircle, MapPin, Users, Play, X, Image as ImageIcon, FileText, Building2, Download, Save } from "lucide-react";
 import { formatCategoryName } from "../../../utils/categoryFormatter";
 import { formatDate, formatDateTime } from "../../../utils/dateUtils";
 import LoadingIndicator from "../../general/LoadingIndicator";
@@ -15,11 +15,14 @@ import { isAbortError } from "../../../utils/axiosException";
 import { SuccessModal } from "../../general/SuccessModal";
 import { ErrorModal } from "../../general/ErrorModal";
 import { validateAttachments } from '../../../utils/attachmentHelper';
+import { createCaseReferral, downloadReferralDocument, getActiveDepartments, getComplaintReferrals, type ActiveDepartment, type CaseReferralRecord } from "../../../services/lgu/referrals";
+import { useAuthStore } from "../../../store/authStore";
 
 const glassButtonBase = "inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md border backdrop-blur-md shadow-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed";
 const glassOutlineButton = `${glassButtonBase} bg-gray-50/70 text-gray-700 border-gray-400/70 hover:bg-gray-200/80`;
 const glassYellowButton = `${glassButtonBase} bg-yellow-500/75 text-white border-yellow-400/70 hover:bg-yellow-700/80`;
 const glassGreenButton = `${glassButtonBase} bg-green-600/80 text-white border-green-600/80 hover:bg-green-700/80`;
+const glassBlueButton = `${glassButtonBase} bg-blue-600/80 text-white border-blue-600/80 hover:bg-blue-700/80`;
 const glassDangerButton = `${glassButtonBase} bg-red-500/75 text-white border-red-400/70 hover:bg-red-700/80`;
 const card = "bg-white border border-gray-200 rounded-xl shadow-sm p-5";
 
@@ -32,6 +35,16 @@ const getResponseAuthorName = (response: any, incident: any) => {
   if (response?.user?.role === 'lgu_official') return 'Local Government Unit';
   if (incident?.barangay?.barangay_name) return `Barangay ${incident.barangay.barangay_name}`;
   return 'Barangay Official';
+};
+
+const emptyReferralForm = {
+  department_id: '',
+  designated_officer: '',
+  designated_officer_position: '',
+  reason_for_referral: '',
+  requested_action: '',
+  receiving_officer: '',
+  receiving_officer_position: '',
 };
 
 const ResponseMediaAction: React.FC<{ attachment: { file_url: string; media_type?: string }; onClick: () => void }> = ({ attachment, onClick }) => {
@@ -95,7 +108,83 @@ export const LguIncidentDetails: React.FC = () => {
     { isOpen: false, title: '', message: '' }
   );
   const [lightboxAttachment, setLightboxAttachment] = useState<{ url: string; type: string } | null>(null);
+  const [isReferralModalOpen, setIsReferralModalOpen] = useState(false);
+  const [referralForm, setReferralForm] = useState(emptyReferralForm);
+  const [departments, setDepartments] = useState<ActiveDepartment[]>([]);
+  const [referrals, setReferrals] = useState<CaseReferralRecord[]>([]);
+  const [isReferralListLoading, setIsReferralListLoading] = useState(true);
+  const [referralListError, setReferralListError] = useState<string | null>(null);
+  const [referralReloadKey, setReferralReloadKey] = useState(0);
+  const [isReferralLoading, setIsReferralLoading] = useState(false);
+  const [isSavingReferral, setIsSavingReferral] = useState(false);
+  const [referralError, setReferralError] = useState<string | null>(null);
+  const [referralDownloadError, setReferralDownloadError] = useState<string | null>(null);
 
+  const userRole = useAuthStore((state) => state.userRole);
+  const referralComplaintId = incident?.complaint_clusters?.[0]?.complaint?.id ?? null;
+  const canManageReferrals = ['lgu_official', 'superadmin', 'barangay_official'].includes(String(userRole ?? ''));
+
+  useEffect(() => {
+    if (!referralComplaintId) {
+      setIsReferralListLoading(false);
+      setReferrals([]);
+      setReferralListError(null);
+      return;
+    }
+
+    let isMounted = true;
+    const loadReferrals = async () => {
+      setIsReferralListLoading(true);
+      setReferralListError(null);
+      try {
+        const referralData = await getComplaintReferrals(referralComplaintId);
+
+        if (isMounted) {
+          setReferrals(referralData);
+        }
+      } catch (loadError) {
+        console.error('Failed to load referrals:', loadError);
+        if (isMounted) {
+          setReferralListError('Unable to check whether this case has already been referred. Please try again.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsReferralListLoading(false);
+        }
+      }
+    };
+
+    loadReferrals();
+    return () => { isMounted = false; };
+  }, [referralComplaintId, referralReloadKey]);
+
+  useEffect(() => {
+    if (!isReferralModalOpen || !referralComplaintId) return;
+
+    let isMounted = true;
+    const loadDepartments = async () => {
+      setIsReferralLoading(true);
+      setReferralError(null);
+      try {
+        const departmentData = await getActiveDepartments();
+        if (isMounted) {
+          setDepartments(departmentData);
+        }
+      } catch (loadError) {
+        console.error('Failed to load departments:', loadError);
+        if (isMounted) {
+          setReferralError('Unable to load departments. Please try again.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsReferralLoading(false);
+        }
+      }
+    };
+
+    loadDepartments();
+    return () => { isMounted = false; };
+  }, [isReferralModalOpen, referralComplaintId]);
 
   useEffect(() => {
     if (resolveIncidentMutation.isSuccess) {
@@ -263,6 +352,68 @@ export const LguIncidentDetails: React.FC = () => {
     });
   };
 
+  const handleReferralChange = (field: keyof typeof referralForm, value: string) => {
+    setReferralForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveReferral = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!referralComplaintId) {
+      setReferralError('No complaint record is available for this incident.');
+      return;
+    }
+
+    if (!referralForm.department_id) {
+      setReferralError('Please select a department to refer the case to.');
+      return;
+    }
+
+    setIsSavingReferral(true);
+    setReferralError(null);
+
+    try {
+      const payload = {
+        complaint_id: referralComplaintId,
+        department_id: Number(referralForm.department_id),
+        designated_officer: referralForm.designated_officer.trim() || null,
+        designated_officer_position: referralForm.designated_officer_position.trim() || null,
+        reason_for_referral: referralForm.reason_for_referral.trim() || null,
+        requested_action: referralForm.requested_action.trim() || null,
+        receiving_officer: referralForm.receiving_officer.trim() || null,
+        receiving_officer_position: referralForm.receiving_officer_position.trim() || null,
+      };
+
+      const createdReferral = await createCaseReferral(referralComplaintId, payload);
+      setReferrals((prev) => [createdReferral, ...prev]);
+      setReferralListError(null);
+      setReferralForm(emptyReferralForm);
+      setIsReferralModalOpen(false);
+    } catch (error: any) {
+      console.error('Failed to save referral:', error);
+      setReferralError(error?.response?.data?.detail || 'Unable to save referral. Please try again.');
+    } finally {
+      setIsSavingReferral(false);
+    }
+  };
+
+  const handleDownloadReferral = async (referralId: number) => {
+    setReferralDownloadError(null);
+    try {
+      const documentBlob = await downloadReferralDocument(referralId);
+      const downloadUrl = window.URL.createObjectURL(documentBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `referral-${referralId}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error: any) {
+      console.error('Failed to download referral:', error);
+      setReferralDownloadError(error?.response?.data?.detail || 'Unable to download referral letter. Please try again.');
+    }
+  };
+
   if (isLoading) {
     return (
       <LoadingIndicator />
@@ -345,10 +496,137 @@ export const LguIncidentDetails: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
         <section className={`${card} lg:col-span-3`}><h2 className="text-base font-semibold text-primary-700 mb-2">{t('incidents.details.description')}</h2><p className="text-base text-slate-800 leading-relaxed whitespace-pre-wrap">{incident.description}</p><div className="mt-6 pt-4 border-t border-gray-400 flex items-center justify-between gap-3"><div className="min-w-0"><h3 className="text-base font-semibold text-primary-700">{t('incidents.details.relatedComplaints')} ({incident.complaint_count})</h3><p className="text-sm text-slate-600">View all complaints associated with this incident.</p></div><button onClick={handleViewAllComplaints} className={glassOutlineButton}><Users size={15} />{t('incidents.details.viewAllComplaints')}</button></div></section>
-        <section className={`${card} lg:col-span-2`}><h2 className="text-base font-semibold text-primary-700 mb-2">{t('incidents.details.remarks')}</h2>{sortedResponses.length === 0 ? <p className="text-base text-slate-500">No responses yet.</p> : <div className={`${sortedResponses.length > 2 ? 'max-h-80 overflow-y-auto' : ''} space-y-3 pr-1`}>{sortedResponses.map((response) => { const attachments = response.response_attachments ?? []; const assignedMembers = response.barangay_members ?? []; return <div key={response.id} className="rounded-lg border border-gray-200 bg-slate-50 p-4 shadow-sm"><p className="text-base text-slate-800 whitespace-pre-wrap leading-6">{response.actions_taken}</p>{attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{attachments.map((attachment: any, idx: number) => <ResponseMediaAction key={attachment.id ?? idx} attachment={attachment} onClick={() => { if (attachment.media_type?.startsWith('application')) { window.open(attachment.file_url, '_blank', 'noopener,noreferrer'); return; } setLightboxAttachment({ url: attachment.file_url, type: attachment.media_type ?? 'image' }); }} />)}</div>}{assignedMembers.length > 0 && <p className="mt-2 text-sm text-slate-600">Assigned to: {assignedMembers.map((member: any) => member.name).join(", ")}</p>}<div className="mt-2 flex items-center justify-between gap-3"><p className="text-sm font-medium text-slate-600">{getResponseAuthorName(response, incident)}</p><p className="text-xs text-slate-400">{formatDateTime(response.response_date, { year: 'numeric', month: 'numeric', day: 'numeric' })}</p></div></div>; })}</div>}</section>
+        <section className={`${card} lg:col-span-2`}><h2 className="text-base font-semibold text-primary-700 mb-2">{t('incidents.details.remarks')}</h2>{sortedResponses.length === 0 ? <p className="text-base text-slate-500">No responses yet.</p> : <div className={`${sortedResponses.length > 2 ? 'max-h-80 overflow-y-auto' : ''} space-y-3 pr-1`}>{sortedResponses.map((response) => { const attachments = response.response_attachments ?? []; const assignedMembers = response.barangay_members ?? []; return <div key={response.id} className="rounded-lg border border-gray-200 bg-slate-50 p-4 shadow-sm"><p className="text-base text-slate-800 whitespace-pre-wrap leading-6">{response.actions_taken}</p>{attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{attachments.map((attachment: any, idx: number) => <ResponseMediaAction key={attachment.id ?? idx} attachment={attachment} onClick={() => { if (attachment.media_type?.startsWith('application')) { window.open(attachment.file_url, '_blank', 'noopener,noreferrer'); return; } setLightboxAttachment({ url: attachment.file_url, type: attachment.media_type ?? 'image' }); }} />)}</div>}{assignedMembers.length > 0 && <p className="mt-2 text-sm text-slate-600">Assigned to: {assignedMembers.map((member: any) => `${member.name} (${member.position})`).join(", ")}</p>}<div className="mt-2 flex items-center justify-between gap-3"><p className="text-sm font-medium text-slate-600">{getResponseAuthorName(response, incident)}</p><p className="text-xs text-slate-400">{formatDateTime(response.response_date, { year: 'numeric', month: 'numeric', day: 'numeric' })}</p></div></div>; })}</div>}</section>
       </div>
 
-      {shouldShowActions && <div className={`${card} flex flex-wrap items-center justify-end gap-2`}><button onClick={handleReview} disabled={reviewIncidentMutation.isPending || isSubmitted || isUnderReviewByLgu || isResolved || isUnderReviewByBarangay} className={glassYellowButton}>{reviewIncidentMutation.isPending ? "Reviewing..." : "Mark for review"}</button><button onClick={handleReject} disabled={rejectIncidentMutation.isPending || isSubmitted || isResolved || isUnderReviewByBarangay} className={glassDangerButton}>{rejectIncidentMutation.isPending ? "Rejecting..." : "Reject"}</button><button onClick={handleResolve} disabled={resolveIncidentMutation.isPending || isSubmitted || isResolved || isUnderReviewByBarangay} className={glassGreenButton}>{resolveIncidentMutation.isPending ? "Resolving..." : "Resolve"}</button></div>}
+      {shouldShowActions && (
+        <div className={`${card} flex flex-wrap items-center justify-end gap-2`}>
+          {canManageReferrals && referrals.length === 0 && (
+            <button type="button" onClick={() => setIsReferralModalOpen(true)} disabled={isReferralListLoading || Boolean(referralListError)} className={glassBlueButton}>
+              <Building2 size={15} />Refer Case
+            </button>
+          )}
+          <button onClick={handleReview} disabled={reviewIncidentMutation.isPending || isSubmitted || isUnderReviewByLgu || isResolved || isUnderReviewByBarangay} className={glassYellowButton}>{reviewIncidentMutation.isPending ? "Reviewing..." : "Mark for review"}</button>
+          <button onClick={handleReject} disabled={rejectIncidentMutation.isPending || isSubmitted || isResolved || isUnderReviewByBarangay} className={glassDangerButton}>{rejectIncidentMutation.isPending ? "Rejecting..." : "Reject"}</button>
+          <button onClick={handleResolve} disabled={resolveIncidentMutation.isPending || isSubmitted || isResolved || isUnderReviewByBarangay} className={glassGreenButton}>{resolveIncidentMutation.isPending ? "Resolving..." : "Resolve"}</button>
+        </div>
+      )}
+
+      {canManageReferrals && referralListError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          <span>{referralListError}</span>
+          <button type="button" onClick={() => setReferralReloadKey((key) => key + 1)} disabled={isReferralListLoading} className="font-semibold underline disabled:opacity-50">
+            {isReferralListLoading ? 'Checking...' : 'Try again'}
+          </button>
+        </div>
+      )}
+
+      {canManageReferrals && referrals.length > 0 && (
+        <section className={`${card} flex flex-wrap items-center justify-between gap-4 border-blue-200 bg-blue-50/60`}>
+          <div className="flex min-w-0 items-start gap-3">
+            <Building2 size={20} className="mt-0.5 shrink-0 text-blue-700" />
+            <div>
+              <h2 className="font-semibold text-blue-900">This case has already been referred.</h2>
+              <p className="mt-1 text-sm text-blue-800">
+                Download the referral document{referrals.length > 1 ? 's' : ''} below.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {referrals.map((referral) => (
+              <button key={referral.id} type="button" onClick={() => handleDownloadReferral(referral.id)} className={glassBlueButton}>
+                <Download size={15} />
+                Download {referral.department?.abbreviation || referral.department?.name || 'Referral'}
+              </button>
+            ))}
+          </div>
+          {referralDownloadError && (
+            <p className="w-full text-sm text-red-700" role="alert">{referralDownloadError}</p>
+          )}
+        </section>
+      )}
+
+      {isReferralModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl border border-gray-200">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900">Referral Workflow</h3>
+                <p className="text-sm text-gray-500">Refer this complaint to an active department.</p>
+              </div>
+              <button type="button" onClick={() => { setIsReferralModalOpen(false); setReferralError(null); }} className="rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700" aria-label="Close referral workflow">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              {isReferralLoading ? (
+                <div className="flex min-h-[200px] items-center justify-center text-sm text-gray-500">Loading referral data...</div>
+              ) : (
+                <form onSubmit={handleSaveReferral} className="space-y-5">
+                  {referralError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{referralError}</div>}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Department</label>
+                      <select
+                        value={referralForm.department_id}
+                        onChange={(event) => handleReferralChange('department_id', event.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                        required
+                      >
+                        <option value="">Select department</option>
+                        {departments.map((department) => (
+                          <option key={department.id} value={department.id}>{department.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Designated Officer</label>
+                      <input value={referralForm.designated_officer} onChange={(event) => handleReferralChange('designated_officer', event.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="e.g. Maria Santos" />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Officer Position</label>
+                      <input value={referralForm.designated_officer_position} onChange={(event) => handleReferralChange('designated_officer_position', event.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="e.g. Social Welfare Officer" />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Receiving Officer</label>
+                      <input value={referralForm.receiving_officer} onChange={(event) => handleReferralChange('receiving_officer', event.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Receiving officer" />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Receiving Officer Position</label>
+                      <input value={referralForm.receiving_officer_position} onChange={(event) => handleReferralChange('receiving_officer_position', event.target.value)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Position" />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Reason for Referral</label>
+                      <textarea value={referralForm.reason_for_referral} onChange={(event) => handleReferralChange('reason_for_referral', event.target.value)} className="min-h-[90px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="State the reason for the referral" required />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="mb-1 block text-sm font-medium text-gray-700">Requested Action</label>
+                      <textarea value={referralForm.requested_action} onChange={(event) => handleReferralChange('requested_action', event.target.value)} className="min-h-[90px] w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Describe the requested action" required />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => { setIsReferralModalOpen(false); setReferralError(null); }} className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+                      <button type="submit" disabled={isSavingReferral} className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+                        <Save size={15} />{isSavingReferral ? 'Saving...' : 'Save Referral'}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightboxAttachment && (
         <ResponseMediaLightbox

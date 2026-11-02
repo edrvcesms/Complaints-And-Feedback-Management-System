@@ -23,6 +23,7 @@ class User(Base):
     full_address = Column(String, nullable=True)
     latitude = Column(String, nullable=True)
     longitude = Column(String, nullable=True)
+    location_updated_at = Column(DateTime(timezone=True), nullable=True)
     id_type = Column(String, nullable=True)
     id_number = Column(String, nullable=True)
     front_id = Column(String, nullable=True)
@@ -39,6 +40,9 @@ class User(Base):
     reject_counter = Column(Integer, default=0)
     is_restricted_until = Column(DateTime(timezone=True), nullable=True)
     clerk_user_id = Column(String(255), unique=True, nullable=True)
+    
+    
+    barangay_member = relationship("BarangayMember", back_populates="user", uselist=False)
     barangay_account = relationship("BarangayAccount", back_populates="user", uselist=False)
     events = relationship("Event", back_populates="uploader", cascade="all, delete-orphan")
     complaint = relationship("Complaint", back_populates="user", cascade="all, delete-orphan")

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import List, Optional
 from .complaint_schema import ComplaintOut
@@ -44,7 +44,13 @@ class IncidentData(IncidentBaseModel):
     hearing_date: Optional[datetime] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    is_resolvable: bool = True
     responses: Optional[List[ResponseSchema]] = None
+
+    @field_validator("is_resolvable", mode="before")
+    @classmethod
+    def default_unset_resolvability(cls, value: Optional[bool]) -> bool:
+        return value is not False
 
     class Config:
         from_attributes = True
@@ -69,6 +75,12 @@ class IncidentOut(BaseModel):
     new_complaint_count: Optional[int] = 0
     first_reported_at: datetime
     last_reported_at: datetime
+    is_resolvable: bool = True
+
+    @field_validator("is_resolvable", mode="before")
+    @classmethod
+    def default_unset_resolvability(cls, value: Optional[bool]) -> bool:
+        return value is not False
 
     class Config:
         from_attributes = True

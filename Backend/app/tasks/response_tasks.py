@@ -36,10 +36,10 @@ def save_response_task(self, incident_id: int, responder_id: int, actions_taken:
         raise self.retry(exc=e)
     
 @celery_worker.task(bind=True, max_retries=3, default_retry_delay=30)
-def assign_barangay_members_task(self, complaint_ids: List[int], barangay_member_ids: List[int]):
+def assign_barangay_members_task(self, incident_id: int, complaint_ids: List[int], barangay_member_ids: List[int]):
     async def _run():
         async with AsyncSessionLocal() as db:
-            await assign_barangay_members_to_complaints(db, complaint_ids, barangay_member_ids)
+            await assign_barangay_members_to_complaints(db, incident_id,complaint_ids, barangay_member_ids)
             await db.commit()
 
     try:

@@ -44,7 +44,7 @@ async def reset_password(request: Request, password_data: ChangePasswordData, db
     return await change_password(password_data, db)
 
 @router.put("/update-current-location", status_code=status.HTTP_200_OK)
-@limiter.limit("5/minute")
+@limiter.limit("30/minute")
 async def update_current_location(request: Request, location_data: UserLocationData, db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     return await update_user_location(current_user.id, location_data, db)
 

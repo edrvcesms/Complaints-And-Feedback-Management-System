@@ -33,3 +33,4 @@ clerk-backend-api
 pyjwt 
 psutil
 pywebpush
+python-docx

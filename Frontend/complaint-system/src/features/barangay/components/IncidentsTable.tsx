@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Incident } from "../../../types/complaints/incident";
 import { Pagination } from "./Pagination";
 import { TableSkeleton } from "./Skeletons";
@@ -71,9 +71,11 @@ export const IncidentTableRow: React.FC<IncidentTableRowProps> = ({
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleView = () => {
-    navigate(`/dashboard/incidents/${incident.id}`);
+    const basePath = location.pathname.startsWith('/member') ? '/member' : '/dashboard';
+    navigate(`${basePath}/incidents/${incident.id}`);
   };
 
   const hasNewComplaints = incident.has_new_complaints || (incident.new_complaint_count ?? 0) > 0;

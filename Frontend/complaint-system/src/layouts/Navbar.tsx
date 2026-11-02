@@ -13,7 +13,7 @@ import { ToastContainer } from "../components/Toast";
 import type { Notification } from "../types/notifications/notification";
 import { formatTimeAgo } from "../utils/dateUtils";
 import { subscribeToPushNotifications, savePushSubscription } from "../services/notifications/pushNotification";
-import { useAddBarangayMember, useBarangayMembers, useRemoveBarangayMember } from "../hooks/useBarangays";
+import { useAddBarangayMember, useBarangayMembers, useMyBarangayDuty, useRemoveBarangayMember } from "../hooks/useBarangays";
 import { BarangayMembersModal } from "../features/barangay/components/BarangayMembersModal";
 import { ChangePasswordModal } from "../features/general/ChangePasswordModal";
 
@@ -23,6 +23,7 @@ interface NavbarProps {
 
 const ROLES = {
   barangay_official: "Barangay Official",
+  barangay_member: "Barangay Member",
   lgu_official: "LGU Official",
   superadmin: "Super Admin",
 }
@@ -33,12 +34,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onLogout }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { userRole, getDisplayName, getUserData } = useUserRole();
+  const isBarangayMember = userRole === "barangay_member";
+  const { duty: barangayMember, isLoading: isLoadingBarangayMember, error: barangayMemberError } = useMyBarangayDuty(isBarangayMember);
   const barangayId = userRole === "barangay_official" ? getUserData()?.id : undefined;
   const { members, isLoading: isLoadingMembers, refetch: refetchMembers } = useBarangayMembers(barangayId);
   const addMemberMutation = useAddBarangayMember(barangayId ?? 0);
   const removeMemberMutation = useRemoveBarangayMember(barangayId ?? 0);
 
-  const displayName = getDisplayName();
+  const displayName = isBarangayMember
+    ? barangayMember?.name ?? (isLoadingBarangayMember ? "Loading profile..." : "Profile unavailable")
+    : getDisplayName();
+  const profileSubtitle = isBarangayMember
+    ? barangayMember?.position ?? (barangayMemberError ? "Position unavailable" : "")
+    : ROLES[userRole as keyof typeof ROLES] || userRole || "User";
 
   const initials = displayName
     .split(" ")
@@ -49,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onLogout }) => {
 
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState<boolean>(false);
+  const [expandedNotifications, setExpandedNotifications] = useState<Set<number>>(() => new Set());
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
@@ -103,6 +112,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onLogout }) => {
 
   const getNotificationsPagePath = () => {
     if (userRole === "barangay_official") return "/dashboard/notifications";
+    if (userRole === "barangay_member") return "/member/notifications";
     if (userRole === "lgu_official") return "/lgu/notifications";
     if (userRole === "superadmin") return "/superadmin/notifications";
     return `${getRoutePrefix()}/notifications`;
@@ -110,6 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onLogout }) => {
 
   const getIncidentPath = (incidentId: number) => {
     if (userRole === "barangay_official") return `/dashboard/incidents/${incidentId}`;
+    if (userRole === "barangay_member") return `/member/incidents/${incidentId}`;
     if (userRole === "lgu_official") return `/lgu/incidents/${incidentId}`;
 
     // Fallback to current route context while auth role is still resolving.
@@ -234,26 +245,27 @@ const handleBellClick = () => {
       ) : (
         <>
           {previewNotifications.map((notification) => (
-            <button
-              key={notification.id}
-              onClick={() => handleNotificationClick(notification)}
-              className="w-full border-b border-gray-100 px-4 sm:px-5 py-3 text-left transition hover:bg-gray-50"
-            >
-              <div className="flex items-start gap-3">
-                {!notification.is_read && (
-                  <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${getNotificationColorClass(notification).dot}`} />
-                )}
+            <div key={notification.id} className="border-b border-gray-100 px-4 py-3 sm:px-5">
+              <button
+                type="button"
+                onClick={() => handleNotificationClick(notification)}
+                className="w-full text-left transition"
+              >
+                <div className="flex items-start gap-3">
+                  {!notification.is_read && (
+                    <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${getNotificationColorClass(notification).dot}`} />
+                  )}
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-medium uppercase tracking-wide ${getNotificationColorClass(notification).text}`}>
-                      {isRejectNotification(notification) ? t('frontend.notifications.reject') : notification.notification_type.replace(/_/g, ' ')}
-                    </span>
-                    <span className="text-[11px] text-gray-400">{formatTimeAgo(notification.sent_at)}</span>
-                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-medium uppercase tracking-wide ${getNotificationColorClass(notification).text}`}>
+                        {isRejectNotification(notification) ? t('frontend.notifications.reject') : notification.notification_type.replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-[11px] text-gray-400">{formatTimeAgo(notification.sent_at)}</span>
+                    </div>
 
-                  <p
-                    className={`mt-0.5 text-sm leading-5 ${isCriticalNotification(notification)
+                    <p
+                      className={`mt-0.5 text-sm leading-5 ${isCriticalNotification(notification)
                         ? "text-red-900"
                         : isWarningNotification(notification)
                           ? "text-amber-900"
@@ -262,26 +274,45 @@ const handleBellClick = () => {
                             : notification.is_read
                               ? "text-gray-700"
                               : "font-medium text-gray-900"
-                      }`}
-                  >
-                    {notification.title}
-                  </p>
+                        }`}
+                    >
+                      {notification.title}
+                    </p>
 
-                  <p
-                    className={`mt-0.5 line-clamp-1 text-xs leading-5 ${isCriticalNotification(notification)
+                    <p
+                      className={`mt-0.5 text-xs leading-5 ${expandedNotifications.has(notification.id) ? "whitespace-pre-wrap break-words" : "line-clamp-2"} ${isCriticalNotification(notification)
                         ? "text-red-700"
                         : isWarningNotification(notification)
                           ? "text-amber-700"
                           : isRejectNotification(notification)
                             ? "text-red-700"
                             : "text-gray-500"
-                      }`}
-                  >
-                    {notification.message}
-                  </p>
+                        }`}
+                    >
+                      {notification.message}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              {notification.message.length > 120 && (
+                <button
+                  type="button"
+                  aria-expanded={expandedNotifications.has(notification.id)}
+                  onClick={() => setExpandedNotifications((current) => {
+                    const next = new Set(current);
+                    if (next.has(notification.id)) {
+                      next.delete(notification.id);
+                    } else {
+                      next.add(notification.id);
+                    }
+                    return next;
+                  })}
+                  className="mt-1 text-xs text-green-700 hover:text-green-900"
+                >
+                  {expandedNotifications.has(notification.id) ? t("common.viewLess") : t("common.viewMore")}
+                </button>
+              )}
+            </div>
           ))}
           <div className="border-t border-gray-100 bg-gradient-to-r from-white to-gray-50 px-5 py-3">
             <div className="flex justify-end">
@@ -428,7 +459,7 @@ const handleBellClick = () => {
                 >
                   <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
                     <p className="text-sm font-semibold text-gray-800 truncate">{displayName}</p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{ROLES[userRole as keyof typeof ROLES] || userRole || 'User'}</p>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{profileSubtitle}</p>
                   </div>
                   {userRole === "barangay_official" && barangayId && (
                     <button

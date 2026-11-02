@@ -5,12 +5,13 @@ import { ForgotPasswordPage } from "./features/authentication/pages/ForgotPasswo
 import { Dashboard } from "./features/barangay/pages/Dashboard"
 import { useAuthStore } from "./store/authStore"
 import { NetworkProvider } from "./context/NetworkContext"
-import { BarangayRoute, LguRoute, AuthRoutes, SuperAdminRoute } from "./routes/ProtectedRoutes"
+import { BarangayRoute, BarangayMemberRoute, LguRoute, AuthRoutes, SuperAdminRoute } from "./routes/ProtectedRoutes"
 import { NotFound } from "./features/general/NotFound"
 import { useEffect } from "react"
 import LoadingIndicator from "./features/general/LoadingIndicator"
 import Navbar from "./layouts/Navbar"
 import DashboardLayout from "./layouts/BarangayDashboardLayout"
+import BarangayMemberDashboardLayout from "./layouts/BarangayMemberDashboardLayout"
 import LguDashboardLayout from "./layouts/LguDashboardLayout"
 import SuperAdminDashboardLayout from "./layouts/SuperAdminDashboardLayout"
 import { IncidentPage } from "./features/barangay/pages/Incident"
@@ -32,6 +33,8 @@ import { LguArchiveIncidents } from "./features/lgu/pages/ArchiveIncidents"
 import { LguAnnouncements } from "./features/lgu/pages/Announcements"
 import { MonthlyBarangayReports } from "./features/lgu/pages/MonthlyBarangayReports"
 import { EmergencyIncidentsPage } from "./features/barangay/pages/EmergencyIncidents"
+import { AssignedIncidentsPage } from "./features/barangay/pages/AssignedIncidents"
+import MyDutyPage from "./features/barangayMember/pages/MyDuty"
 import IncidentTrackingPage from "./features/general/pages/IncidentTrackingPage"
 import { MonthlyReportDetails } from "./features/lgu/pages/MonthlyReportDetails"
 import { CategoryIncidents } from "./features/lgu/pages/CategoryIncidents"
@@ -53,6 +56,7 @@ function App() {
   const clearAuth = useAuthStore(state => state.clearAuth);
 
   const getDefaultDashboardPath = (role: string | null) => {
+    if (role === "barangay_member") return "/member/assigned-incidents";
     if (role === "lgu_official") return "/lgu/dashboard";
     if (role === "superadmin") return "/superadmin/dashboard";
     return "/dashboard";
@@ -99,6 +103,18 @@ function App() {
               <Route path="feedbacks" element={<FeedbacksPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
             </Route>
+          </Route>
+
+          {/* Barangay Member Routes */}
+          <Route element={<BarangayMemberRoute />}>
+            <Route path="/member/*" element={<BarangayMemberDashboardLayout />}>
+              <Route path="assigned-incidents" element={<AssignedIncidentsPage />} />
+              <Route path="my-duty" element={<MyDutyPage />} />
+              <Route path="incidents/:incidentId" element={<IncidentDetails />} />
+                <Route path="incidents/:incidentId/tracking" element={<IncidentTrackingPage />} />
+                <Route path="incidents/:incidentId/complaints" element={<IncidentComplaints />} />
+                <Route path="notifications" element={<NotificationsPage />} />
+              </Route>
           </Route>
 
           {/* LGU Official Routes */}

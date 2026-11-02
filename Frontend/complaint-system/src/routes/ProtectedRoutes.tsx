@@ -42,6 +42,9 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
     if (userRole === 'barangay_official') {
       return <Navigate to="/dashboard" replace />;
     }
+    if (userRole === 'barangay_member') {
+      return <Navigate to="/member/assigned-incidents" replace />;
+    }
     if (userRole === 'lgu_official') {
       return <Navigate to="/lgu/dashboard" replace />;
     }
@@ -75,6 +78,14 @@ export const BarangayRoute: React.FC<{ children?: React.ReactNode }> = ({ childr
   );
 };
 
+export const BarangayMemberRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+  return (
+    <RoleProtectedRoute allowedRoles={['barangay_member']}>
+      {children}
+    </RoleProtectedRoute>
+  );
+};
+
 export const LguRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   return (
     <RoleProtectedRoute allowedRoles={['lgu_official']}>
@@ -97,6 +108,9 @@ export const AuthRoutes: React.FC<{ children?: React.ReactNode }> = ({ children 
   if (isAuthenticated) {
     if (userRole === 'barangay_official') {
       return <Navigate to="/dashboard" replace />;
+    }
+    if (userRole === 'barangay_member') {
+      return <Navigate to="/member/assigned-incidents" replace />;
     }
     if (userRole === 'lgu_official') {
       return <Navigate to="/lgu/dashboard" replace />;

@@ -16,7 +16,7 @@ from app.constants.complaint_status import ComplaintStatus
 from app.constants.roles import UserRole
 from app.schemas.report_schema import ComplaintReportRequest
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -84,9 +84,8 @@ def _report_styles():
     "header": ParagraphStyle("ReportHeader", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=10, leading=13, alignment=TA_CENTER),
     "title": ParagraphStyle("ReportTitle", parent=styles["BodyText"], fontName="Helvetica-Bold", fontSize=13, leading=16, alignment=TA_CENTER, spaceAfter=4),
     "section": ParagraphStyle("ReportSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=10, leading=12, spaceBefore=8, spaceAfter=5),
-    "table": ParagraphStyle("ReportTable", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=8, alignment=TA_LEFT),
+    "table": ParagraphStyle("ReportTable", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=8, alignment=TA_CENTER),
     "table_center": ParagraphStyle("ReportTableCenter", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=8, alignment=TA_CENTER),
-    "table_right": ParagraphStyle("ReportTableRight", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=8, alignment=TA_RIGHT),
   }
 
 
@@ -139,10 +138,11 @@ def _build_complaint_report_pdf(report: dict) -> bytes:
     ("Escalated", "escalated"),
     ("Rejected", "rejected"),
   ]:
-    summary_rows.append([_p(label, styles["table"]), _p(report["summary"][key], styles["table_right"])])
+    summary_rows.append([_p(label, styles["table"]), _p(report["summary"][key], styles["table_center"])])
   summary = Table(summary_rows, colWidths=[90 * mm, 25 * mm], repeatRows=1)
   summary.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -157,11 +157,12 @@ def _build_complaint_report_pdf(report: dict) -> bytes:
   status_headers = ["No.", "Barangay", "Total", "Resolved", "Under Review", "Escalated", "Rejected"]
   distribution_rows = [[_p(value, styles["table_center"] if index != 1 else styles["table"]) for index, value in enumerate(status_headers)]]
   for index, row in enumerate(report["barangays"], 1):
-    distribution_rows.append([_p(index, styles["table_center"]), _p(row["name"], styles["table"])] + [_p(row[key], styles["table_right"]) for key in ["total", "resolved", "under_review", "escalated", "rejected"]])
-  distribution_rows.append([_p("", styles["table_center"]), _p("TOTAL", styles["table"])] + [_p(report["summary"][key], styles["table_right"]) for key in ["total", "resolved", "under_review", "escalated", "rejected"]])
+    distribution_rows.append([_p(index, styles["table_center"]), _p(row["name"], styles["table"])] + [_p(row[key], styles["table_center"]) for key in ["total", "resolved", "under_review", "escalated", "rejected"]])
+  distribution_rows.append([_p("", styles["table_center"]), _p("TOTAL", styles["table"])] + [_p(report["summary"][key], styles["table_center"]) for key in ["total", "resolved", "under_review", "escalated", "rejected"]])
   distribution = Table(distribution_rows, colWidths=[8 * mm, 38 * mm, 15 * mm, 18 * mm, 20 * mm, 17 * mm, 17 * mm], repeatRows=1)
   distribution.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.35, colors.black), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#EDEDED")), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -175,8 +176,8 @@ def _build_complaint_report_pdf(report: dict) -> bytes:
   category_headers = ["No.", "Barangay", *[_display_category_name(category) for category in report["categories"]], "Total"]
   category_rows = [[_p(value, styles["table_center"] if index != 1 else styles["table"]) for index, value in enumerate(category_headers)]]
   for index, row in enumerate(report["barangays"], 1):
-    category_rows.append([_p(index, styles["table_center"]), _p(row["name"], styles["table"])] + [_p(row["categories"][category], styles["table_right"]) for category in report["categories"]] + [_p(row["total"], styles["table_right"])])
-  category_rows.append([_p("", styles["table_center"]), _p("TOTAL", styles["table"])] + [_p(report["category_totals"][category], styles["table_right"]) for category in report["categories"]] + [_p(report["summary"]["total"], styles["table_right"])])
+    category_rows.append([_p(index, styles["table_center"]), _p(row["name"], styles["table"])] + [_p(row["categories"][category], styles["table_center"]) for category in report["categories"]] + [_p(row["total"], styles["table_center"])])
+  category_rows.append([_p("", styles["table_center"]), _p("TOTAL", styles["table"])] + [_p(report["category_totals"][category], styles["table_center"]) for category in report["categories"]] + [_p(report["summary"]["total"], styles["table_center"])])
   # Keep numeric category columns compact; long category names wrap in the header
   # instead of stretching every column across the full page.
   category_column_width = 15 * mm
@@ -192,6 +193,7 @@ def _build_complaint_report_pdf(report: dict) -> bytes:
   )
   category.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.35, colors.black), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#EDEDED")), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -243,10 +245,11 @@ def _build_barangay_complaint_report_pdf(report: dict) -> bytes:
     ("Forwarded to LGU", "forwarded"),
     ("Still Under Review", "under_review"),
   ]:
-    summary_rows.append([_p(label, styles["table"]), _p(report["summary"][key], styles["table_right"])])
+    summary_rows.append([_p(label, styles["table"]), _p(report["summary"][key], styles["table_center"])])
   summary = Table(summary_rows, colWidths=[105 * mm, 25 * mm], repeatRows=1)
   summary.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -265,9 +268,10 @@ def _build_barangay_complaint_report_pdf(report: dict) -> bytes:
   interpretations = Table(interpretation_rows, colWidths=[38 * mm, 92 * mm], repeatRows=1)
   interpretations.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8F1E8")),
     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
     ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
   ]))
@@ -278,13 +282,14 @@ def _build_barangay_complaint_report_pdf(report: dict) -> bytes:
   for category in report["categories"]:
     category_rows.append([
       _p(_display_category_name(category["name"]), styles["table"]),
-      _p(category["total"], styles["table_right"]),
+      _p(category["total"], styles["table_center"]),
     ])
   if not report["categories"]:
-    category_rows.append([_p("No complaints recorded during this period.", styles["table"]), _p(0, styles["table_right"])])
+    category_rows.append([_p("No complaints recorded during this period.", styles["table"]), _p(0, styles["table_center"])])
   categories = Table(category_rows, colWidths=[105 * mm, 25 * mm], repeatRows=1)
   categories.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -305,20 +310,21 @@ def _build_barangay_complaint_report_pdf(report: dict) -> bytes:
   for category in report["satisfaction_by_category"]:
     satisfaction_rows.append([
       _p(_display_category_name(category["name"]), styles["table"]),
-      _p(category["responses"], styles["table_right"]),
-      _p(category["average_rating"], styles["table_right"]),
+      _p(category["responses"], styles["table_center"]),
+      _p(category["average_rating"], styles["table_center"]),
       _p(category["performance"], styles["table_center"]),
     ])
   if not report["satisfaction_by_category"]:
     satisfaction_rows.append([
       _p("No resident satisfaction ratings recorded during this period.", styles["table"]),
-      _p(0, styles["table_right"]),
-      _p("N/A", styles["table_right"]),
+      _p(0, styles["table_center"]),
+      _p("N/A", styles["table_center"]),
       _p("No Rating", styles["table_center"]),
     ])
   satisfaction = Table(satisfaction_rows, colWidths=[62 * mm, 22 * mm, 28 * mm, 28 * mm], repeatRows=1)
   satisfaction.setStyle(TableStyle([
     ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

@@ -472,7 +472,7 @@ async def officials_login(login_data: LoginData, db: AsyncSession):
             logger.warning(f"Login attempt with incorrect password for email: {login_data.email}")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         
-        if user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.LGU_OFFICIAL]:
+        if user.role not in [UserRole.BARANGAY_OFFICIAL, UserRole.LGU_OFFICIAL, UserRole.BARANGAY_MEMBER]:
             logger.warning(f"Login attempt with unauthorized role for email: {login_data.email}")
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized Access")
 

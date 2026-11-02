@@ -5,7 +5,8 @@ from app.dependencies.db_dependency import get_async_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.complaint_schema import ComplaintCreateData
 from app.dependencies.rate_limiter import limiter
-from app.services.complaint_services import submit_complaint, get_my_complaints, get_all_complaints, get_complaint_by_id, get_complaint_summary, user_complaints_statistics, get_weekly_stats, get_monthly_stats, get_yearly_stats, get_geometric_location_details
+from app.services.complaint_services import submit_complaint, get_my_complaints, get_all_complaints, get_complaint_by_id, get_geometric_location_details
+from app.services.complaint_stats_services import get_complaint_summary, get_weekly_stats, get_monthly_stats, get_yearly_stats, user_complaints_statistics
 from app.dependencies.auth_dependency import get_current_user
 from app.services.attachment_services import upload_attachments
 from app.utils.attachments import validate_upload_files

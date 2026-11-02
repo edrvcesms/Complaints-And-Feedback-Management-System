@@ -1,4 +1,4 @@
-import { getIncidents, getAllIncidents, getScheduledHearings, getIncidentById, getComplaintsByIncidentId, resolveIncident, rejectIncident, reviewIncident, markIncidentAsViewed, notifyHearing } from "../services/incidents/incidents";
+import { getIncidents, getAllIncidents, getAssignedIncidents, getScheduledHearings, getIncidentById, getComplaintsByIncidentId, resolveIncident, markIncidentUnresolvable, rejectIncident, reviewIncident, markIncidentAsViewed, notifyHearing } from "../services/incidents/incidents";
 import { endorseIncidentToLgu } from "../services/endorsement/incidentEndorsement";
 import { getForwardedIncidents, getAllForwardedIncidents } from "../services/lgu/forwardedIncidents";
 import { fetchRejectionCategories } from "../services/category/rejectionCategory";
@@ -10,6 +10,17 @@ import { markHearingAsSuccessful, rescheduleHearing } from "../services/incident
 import type { RejectionCategory } from "../types/general/category";
 import type { PaginatedResponse, PaginationQueryParams } from "../types/general/pagination";
 import type { IncidentQueryParams } from "../services/incidents/incidents";
+
+const invalidateIncidentQueries = () => Promise.all([
+  queryClient.invalidateQueries({ queryKey: ["incidents"] }),
+  queryClient.invalidateQueries({ queryKey: ["assignedIncidents"] }),
+  queryClient.invalidateQueries({ queryKey: ["complaints"] }),
+  queryClient.invalidateQueries({ queryKey: ["complaint-stats"] }),
+  queryClient.invalidateQueries({ queryKey: ["allForwardedIncidents"] }),
+  queryClient.invalidateQueries({ queryKey: ["forwardedIncidents"] }),
+  queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] }),
+  queryClient.invalidateQueries({ queryKey: ["scheduledHearings"] }),
+]);
 
 type ReviewIncidentPayload = {
   actions_taken: string;
@@ -71,10 +82,42 @@ export const useAllIncidents = (params: IncidentQueryParams) => {
   };
 };
 
+export const useAssignedIncidents = (params: IncidentQueryParams) => {
+  const { data, isLoading, isFetching, error } = useQuery<PaginatedResponse<Incident>>({
+    queryKey: [
+      "assignedIncidents",
+      params.page,
+      params.page_size,
+      params.search,
+      params.sort,
+      params.order,
+      params.complaint_status,
+      params.category_name,
+      params.severity_level,
+      params.date_from,
+      params.date_to,
+    ],
+    queryFn: () => getAssignedIncidents(params),
+    placeholderData: keepPreviousData,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+  });
+
+  return {
+    incidents: data?.data ?? [],
+    pagination: data?.pagination,
+    isLoading,
+    isFetching,
+    error,
+  };
+};
+
 export const useIncidentDetails = (incidentId: number) => {
   const { data, isLoading, error } = useQuery<Incident>({
     queryKey: ["incidents", incidentId],
     queryFn: () => getIncidentById(incidentId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   return {
@@ -109,19 +152,17 @@ export const useResolveIncident = (incidentId: number) => {
     mutationKey: ["resolveIncident", incidentId],
     mutationFn: (payload: { actions_taken: string; attachments?: File[]; barangay_member_ids?: number[] }) =>
       resolveIncident(incidentId, payload),
-    onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ["complaints"] });       // list + summary + details
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["assignedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["allForwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["forwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
+
+export const useMarkIncidentUnresolvable = (incidentId: number) =>
+  useMutation({
+    mutationKey: ["markIncidentUnresolvable", incidentId],
+    mutationFn: () => markIncidentUnresolvable(incidentId),
+    onSuccess: invalidateIncidentQueries,
+  });
 
 export const useReviewIncident = (incidentId: number) => {
   const mutation = useMutation({
@@ -132,16 +173,7 @@ export const useReviewIncident = (incidentId: number) => {
         { actions_taken: payload.actions_taken, attachments: payload.attachments, barangay_member_ids: payload.barangay_member_ids },
         payload.signal
       ),
-    onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ["complaints"] });       // list + summary + details
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["assignedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["allForwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["forwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
@@ -151,13 +183,7 @@ export const useForwardIncidentToLgu = (incidentId: number) => {
     mutationKey: ["forwardIncidentToLgu", incidentId],
     mutationFn: (payload: { actions_taken: string; attachments?: File[] }) =>
       endorseIncidentToLgu(incidentId, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-       queryClient.invalidateQueries({ queryKey: ["complaints"] });       // list + summary + details
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
@@ -167,14 +193,7 @@ export const useRejectIncident = (incidentId: number) => {
     mutationKey: ["rejectIncident", incidentId],
     mutationFn: (payload: { actions_taken: string; rejection_category_id?: number; attachments?: File[]; barangay_member_ids?: number[] }) =>
       rejectIncident(incidentId, payload),
-    onSuccess: () => {
-       queryClient.invalidateQueries({ queryKey: ["complaints"] });       // list + summary + details
-    queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["complaints"] });       // list + summary + details
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["forwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 }
@@ -228,15 +247,7 @@ export const useAllForwardedIncidents = (params: IncidentQueryParams) => {
 export const useMarkIncidentAsViewed = () => {
   const mutation = useMutation({
     mutationFn: (incidentId: number) => markIncidentAsViewed(incidentId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", "complaints"] });
-      queryClient.invalidateQueries({ queryKey: ["complaints"] });
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["allForwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["forwardedIncidents"] });
-      queryClient.invalidateQueries({ queryKey: ["archiveIncidents"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
@@ -244,13 +255,7 @@ export const useMarkIncidentAsViewed = () => {
 export const useNotifyHearing = () => {
   const mutation = useMutation({
     mutationFn: ({ incidentId, hearingDate }: { incidentId: number; hearingDate: FormData }) => notifyHearing(incidentId, hearingDate),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", variables.incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["scheduledHearings"] });
-      queryClient.invalidateQueries({ queryKey: ["complaints"] });
-      queryClient.invalidateQueries({ queryKey: ["complaint-stats"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
@@ -259,11 +264,7 @@ export const useMarkHearingSuccess = (incidentId: number) => {
   const mutation = useMutation({
     mutationKey: ["markHearing", incidentId],
     mutationFn: (isSuccessful: boolean) => markHearingAsSuccessful(incidentId, isSuccessful),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId, "complaints"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };
@@ -272,12 +273,7 @@ export const useRescheduleHearing = (incidentId: number) => {
   const mutation = useMutation({
     mutationKey: ["rescheduleHearing", incidentId],
     mutationFn: (hearingFormData: FormData) => rescheduleHearing(incidentId, hearingFormData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId] });
-      queryClient.invalidateQueries({ queryKey: ["incidents", incidentId, "complaints"] });
-      queryClient.invalidateQueries({ queryKey: ["scheduledHearings"] });
-    }
+    onSuccess: invalidateIncidentQueries,
   });
   return mutation;
 };

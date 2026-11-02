@@ -11,6 +11,7 @@ from app.core.security import is_token_revoked, verify_token
 from app.constants.roles import UserRole
 from app.models.barangay_account import BarangayAccount
 from app.utils.logger import logger
+from app.models.barangay_members import BarangayMember
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -102,6 +103,24 @@ async def get_current_user(
             user.barangay_account.barangay_id if user.barangay_account else "N/A",
         )
         return user
+    
+
+    if user.role == UserRole.BARANGAY_MEMBER:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.barangay_member))
+            .where(User.id == user_id)
+        )
+        user = result.scalars().first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not user.barangay_member:
+            raise HTTPException(
+                status_code=404,
+                detail="Barangay member not found"
+            )
 
     return user
 

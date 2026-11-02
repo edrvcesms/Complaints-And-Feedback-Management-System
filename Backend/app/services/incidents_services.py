@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 from app.services.emergency_queue import remove_emergency
 from app.schemas.response_schema import ResponseCreateSchema
 from app.constants.complaint_status import ComplaintStatus
-from app.models.incident_model import IncidentModel
+from app.models.incident_model import IncidentModel, incident_barangay_members
 from app.models.response import Response
 from app.models.incident_complaint import IncidentComplaintModel
 from app.schemas.incident_schema import IncidentData, IncidentOut
-from app.utils.caching import delete_cache
+from app.models.barangay_account import BarangayAccount
 from app.utils.logger import logger
 from app.models.complaint import Complaint
 from app.tasks.notification_tasks import send_notifications_task, send_web_push_notification_task
@@ -26,14 +26,12 @@ from app.constants.roles import UserRole
 from app.utils.query_optimization import QueryOptions, BatchLoader
 from app.utils.cache_invalidator_optimized import CacheInvalidator
 from app.core.pagination import paginate
-from app.core.pagination_params import ListParams
 from app.core.pagination_response import PaginatedResponse
 from app.utils.caching import DEFAULT_LIST_CACHE_TTL_SECONDS, EMPTY_LIST_CACHE_TTL_SECONDS, build_list_cache_key
 from sqlalchemy import select, update, or_, case, cast, String, func
 from app.core.pagination_params import IncidentListParams
 from app.models.category import Category
 from app.models.barangay import Barangay
-from app.schemas.web_push_schema import PushNotificationPayload
 from app.utils.incident_filter import _apply_incident_filters_and_sort, PRIORITY_SCORE
 
 async def get_incidents_by_barangay(barangay_id: int, db: AsyncSession, params: IncidentListParams) -> PaginatedResponse[IncidentOut]:
@@ -153,146 +151,120 @@ async def get_incident_by_id(incident_id: int, db: AsyncSession):
         logger.exception("Error in get_incident_by_id")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
     
-async def forward_incident_to_lgu(response_data: ResponseCreateSchema, incident_id: int, responder_id: int, attachments: Optional[List[UploadFile]], db: AsyncSession):
+async def get_assigned_incidents_for_barangay_member(barangay_member_id: int, db: AsyncSession, params: IncidentListParams) -> PaginatedResponse[IncidentOut]:
     try:
-        if not attachments:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Attachments are required when escalating an incident",
-            )
+        logger.info(f"Fetching assigned incidents for barangay member ID: {barangay_member_id} with params: {params.model_dump()}")
+        cache_key = build_list_cache_key("assigned_incidents", params.model_dump(mode="json"), barangay_member_id=barangay_member_id)
+        incidents_cache = await get_cache(cache_key)
+        if incidents_cache is not None:
+            logger.info(f"Cache hit for barangay member ID: {barangay_member_id}")
+            return PaginatedResponse[IncidentOut].model_validate(incidents_cache)
 
-        incident_result = await db.execute(select(IncidentModel).where(IncidentModel.id == incident_id))
-        incident = incident_result.scalars().first()
+        statement = (
+            select(IncidentModel)
+            .join(incident_barangay_members)
+            .where(incident_barangay_members.c.barangay_member_id == barangay_member_id)
+            .options(*QueryOptions.incident_full())
+        )
+
+        statement = _apply_incident_filters_and_sort(statement, params)
+
+        page = await paginate(db, statement, params, mapper=lambda item: IncidentOut.model_validate(item, from_attributes=True))
+        response = PaginatedResponse[IncidentOut].model_validate(page)
+        await set_cache(cache_key, response.model_dump(mode="json"), expiration=DEFAULT_LIST_CACHE_TTL_SECONDS if response.data else EMPTY_LIST_CACHE_TTL_SECONDS)
+        return response
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in get_assigned_incidents_for_barangay_member")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+ 
+async def mark_incident_as_unresolvable(
+    incident_id: int,
+    db: AsyncSession,
+    barangay_member_id: Optional[int] = None,
+):
+    """Mark an incident as unresolvable"""
+    try:
+        result = await db.execute(
+            select(IncidentModel)
+            .where(IncidentModel.id == incident_id)
+        )
+        incident = result.scalars().first()
         
         if not incident:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-        
-        
-        barangay_id = incident.barangay_id
-        
-        result = await db.execute(select(IncidentComplaintModel.complaint_id).where(IncidentComplaintModel.incident_id == incident_id))
-        
-        complaint_ids = result.scalars().all()
-        
-        if not complaint_ids:
-            return {"message": "No complaints found for this incident"}
-        
-        result = await db.execute(select(Complaint).where(Complaint.id.in_(complaint_ids)))
-        complaints = result.scalars().all()
-        
-        if complaints[0].is_rejected_by_lgu:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot forward incident. You cannot forward an incident that has been rejected by the LGU.")
-        
-        await db.execute(
-            update(Complaint)   
-            .where(Complaint.id.in_(complaint_ids))
-            .values(
-                status=ComplaintStatus.FORWARDED_TO_LGU.value,
-                forwarded_at=datetime.now(timezone.utc),
-                is_rejected_by_lgu=False
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Incident {incident_id} not found"
             )
-        )
-        
-        await log_status_change(
-            complaint_ids=complaint_ids,
-            new_status=ComplaintStatus.FORWARDED_TO_LGU.value,
-            changed_by_user_id=responder_id,
-            db=db
-        )
-        logger.info(f"Updated {len(complaint_ids)} complaints to FORWARDED_TO_LGU status for incident ID: {incident_id}")
-        incident.new_complaint_count = len(complaint_ids)
-        incident.has_new_complaints = True
-        incident.updated_at = datetime.now(timezone.utc)
-        if incident.hearing_date:
-            incident.hearing_date = None
-        await db.commit()
-        
-        # OPTIMIZED: Batch fetch all complaints at once instead of in loop
-        complaints_dict = await BatchLoader.fetch_complaints_by_ids(db, complaint_ids, minimal=True)
-        
-        # Send notifications using cached complaints
-        for complaint_id in complaint_ids:
-            complaint = complaints_dict.get(complaint_id)
-            if complaint:
-                send_notifications_task.delay(
-                    user_id=complaint.user_id,
-                    title="Complaint Forwarded to LGU",
-                    incident_id=incident_id,
-                    message="Your complaint has been forwarded to the LGU for further processing.",
-                    complaint_id=complaint.id,
-                    notification_type="update",
-                    event="info"
+
+        if barangay_member_id is not None:
+            assignment_result = await db.execute(
+                select(incident_barangay_members.c.incident_id).where(
+                    incident_barangay_members.c.incident_id == incident_id,
+                    incident_barangay_members.c.barangay_member_id == barangay_member_id,
                 )
-                
-        response = Response(
-            incident_id=incident_id,
-            responder_id=responder_id,
-            actions_taken=response_data.actions_taken,
-            response_date=datetime.now(timezone.utc),
-        )
-        db.add(response)
-        await db.commit()
-        await db.refresh(response)
-
-        if attachments:
-            await enqueue_response_attachments(attachments, response.id, responder_id, incident_id)
+            )
+            if assignment_result.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This incident is not assigned to you.",
+                )
         
-        result = await db.execute(
-            select(User).options(selectinload(User.push_subscriptions)).where(User.role == "lgu_official")
-        )
-        lgu_officials = result.scalars().all()
-
-        for official in lgu_officials:
-            send_notifications_task.delay(
-                user_id=official.id,
-                title="New Incident Forwarded to LGU",
-                message=f"A new incident with ID {incident.id} has been forwarded to the LGU.",
-                complaint_id=None,
-                incident_id=incident_id,
-                notification_type="info",
-                event="info"
-            )
-
-            payload = {
-                "title": "New Incident Forwarded to LGU",
-                "body": f"A new incident with ID {incident.id} has been forwarded to the LGU.",
-                "icon": "https://cfms-stamaria.com/StaMariaLogo.jpg",
-                "url": f"https://cfms-stamaria.com/lgu/incidents/{incident.id}"
-            }
-
-            send_web_push_notification_task.delay(
-                user_id=official.id,
-                payload=payload
-            )
-
-            incident.lgu_account_id = official.id
-
+        newly_marked_unresolvable = incident.is_resolvable is not False
+        incident.is_resolvable = False
         await db.commit()
-            
-        # OPTIMIZED: Use new CacheInvalidator with pipeline
+
+        if newly_marked_unresolvable:
+            official_result = await db.execute(
+                select(BarangayAccount.user_id).where(
+                    BarangayAccount.barangay_id == incident.barangay_id
+                )
+            )
+            official_user_id = official_result.scalar_one_or_none()
+            if official_user_id is not None:
+                notification_title = "Incident Marked Unresolvable"
+                notification_message = (
+                    f"Incident #{incident.id}, '{incident.title}', was marked as "
+                    "unresolvable by an assigned Barangay Member and needs further action."
+                )
+                send_notifications_task.delay(
+                    user_id=official_user_id,
+                    title=notification_title,
+                    message=notification_message,
+                    incident_id=incident.id,
+                    notification_type="incident_unresolvable",
+                )
+                send_web_push_notification_task.delay(
+                    user_id=official_user_id,
+                    payload={
+                        "title": notification_title,
+                        "body": notification_message,
+                        "icon": "https://cfms-stamaria.com/StaMariaLogo.jpg",
+                        "url": f"https://cfms-stamaria.com/dashboard/incidents/{incident.id}",
+                    },
+                )
+            else:
+                logger.warning(
+                    f"No barangay official account found for incident {incident.id}; "
+                    "unresolvable notification was not sent"
+                )
+        
         await CacheInvalidator.invalidate_cache(
-            complaint_ids=complaint_ids,
-            user_ids=await BatchLoader.fetch_user_ids_for_complaints(db, complaint_ids),
-            barangay_id=barangay_id,
             incident_ids=[incident_id],
+            barangay_id=incident.barangay_id,
             include_global=True
         )
-            
-            
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"message": "All complaints under this incident have been forwarded to LGU"}
-        )
         
+        return {"message": f"Incident {incident_id} marked as unresolvable."}
+    
     except HTTPException:
         raise
     
     except Exception:
-        await db.rollback()
-        logger.exception("Error in forward_incident_to_lgu")
+        logger.exception("Error in mark_incident_as_unresolvable")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
-    
-
 
 async def mark_incident_as_viewed(user_id: int, incident_id: int, db: AsyncSession):
     """Mark an incident as viewed, resetting new complaint indicators"""

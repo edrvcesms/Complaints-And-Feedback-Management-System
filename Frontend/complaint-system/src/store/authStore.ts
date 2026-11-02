@@ -46,8 +46,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         }
         
 
-        const validRoles: UserRole[] = ['barangay_official', 'lgu_official', 'superadmin'];
-        const isValidRole = role && validRoles.includes(role);
+        const validRoles: UserRole[] = ['barangay_official', 'barangay_member', 'lgu_official', 'superadmin'];
+        const isValidRole = role && validRoles.includes(role as UserRole);
 
         set({
             barangayAccountData: barangayData,

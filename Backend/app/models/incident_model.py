@@ -9,10 +9,17 @@ from datetime import datetime, timezone
 from app.database.database import Base
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime,
-    ForeignKey, Text, Boolean, Index, JSON
+    ForeignKey, Text, Boolean, Index, JSON, Table
 )
 from sqlalchemy.orm import relationship, DeclarativeBase    
 
+
+incident_barangay_members = Table(
+    "incident_barangay_members",
+    Base.metadata,
+    Column("incident_id", ForeignKey("incidents.id", ondelete="CASCADE"), primary_key=True),
+    Column("barangay_member_id", ForeignKey("barangay_members.id", ondelete="CASCADE"), primary_key=True),
+)
 
 class IncidentModel(Base):
     """
@@ -35,6 +42,7 @@ class IncidentModel(Base):
     is_hearing_successful = Column(Boolean, nullable=True, default=None)
     hearing_respondents = Column(JSON, nullable=False, default=list)
     is_emergency = Column(Boolean, nullable=True, default=False)
+    is_resolvable = Column(Boolean, nullable=True, default=True)
     
     last_expiry_notif_user_id = Column(Integer, nullable=True, default=None)
     last_expiry_notif_checkpoint = Column(Integer, nullable=True, default=None)
@@ -79,4 +87,9 @@ class IncidentModel(Base):
         # Composite index for the most common query pattern:
         # "Find active incidents in this barangay + category"
         Index("ix_incident_barangay_category_status", "barangay_id", "category_id", "status"),
+    )
+    barangay_members = relationship(
+        "BarangayMember",
+        secondary=incident_barangay_members,
+        back_populates="incidents",
     )

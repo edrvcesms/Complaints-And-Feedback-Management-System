@@ -25,5 +25,6 @@ export interface Incident {
   hearing_date?: string | null;
   hearing_count?: number | null;
   is_hearing_successful?: boolean | null;
+  is_resolvable?: boolean | null;
   responses?: ResponseData[];
 }

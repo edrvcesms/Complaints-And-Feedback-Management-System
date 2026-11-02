@@ -18,6 +18,8 @@ from app.utils.logger import logger
 from app.utils.caching import set_cache, get_cache, delete_cache, delete_cache_prefix
 from app.core.config import settings
 import httpx
+import math
+from app.constants.roles import UserRole
 
 async def get_user_by_id(user_id: int, db: AsyncSession) -> UserData:
     try:
@@ -224,15 +226,45 @@ async def change_password(password_data: ChangePasswordData, db: AsyncSession):
     
 async def update_user_location(user_id: int, location_data: UserLocationData, db: AsyncSession):
     try:
-        logger.info(f"Updating location for user ID {user_id} to latitude {location_data.latitude} and longitude {location_data.longitude}")
+        try:
+            latitude = float(location_data.latitude)
+            longitude = float(location_data.longitude)
+        except (TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Latitude and longitude must be valid coordinates.",
+            ) from error
+        if (
+            not math.isfinite(latitude)
+            or not math.isfinite(longitude)
+            or not -90 <= latitude <= 90
+            or not -180 <= longitude <= 180
+        ):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Latitude and longitude must be valid coordinates.")
+
+        logger.info(f"Updating location for user ID {user_id}")
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalars().first()
 
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         
-        user.latitude = location_data.latitude
-        user.longitude = location_data.longitude
+        user.latitude = str(latitude)
+        user.longitude = str(longitude)
+        user.location_updated_at = datetime.now(timezone.utc)
+
+        if user.role == UserRole.BARANGAY_MEMBER.value:
+            await delete_cache(f"user_profile:{user_id}")
+            await delete_cache(f"auth_user:{user_id}")
+            await db.commit()
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "message": "Location updated successfully",
+                    "location_updated_at": user.location_updated_at.isoformat(),
+                },
+            )
+
         barangay_info = get_barangay(location_data.latitude, location_data.longitude)
         if barangay_info:
             user.barangay = barangay_info["name"]
@@ -252,7 +284,10 @@ async def update_user_location(user_id: int, location_data: UserLocationData, db
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"message": "Location updated successfully"}
+            content={
+                "message": "Location updated successfully",
+                "location_updated_at": user.location_updated_at.isoformat(),
+            },
         )
     
     except HTTPException:

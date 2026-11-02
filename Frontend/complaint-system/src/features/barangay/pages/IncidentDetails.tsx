@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from "react-router-dom";
 import { format } from "date-fns";
-import { useIncidentDetails, useRejectionCategories } from "../../../hooks/useIncidents";
+import { useIncidentDetails, useRejectionCategories, useMarkIncidentUnresolvable } from "../../../hooks/useIncidents";
 import { ArrowLeft, AlertCircle, MapPin, Users, UserRound, Clock, CalendarIcon, Play, X, Image as ImageIcon, FileText } from "lucide-react";
 import { formatCategoryName } from "../../../utils/categoryFormatter";
 import { formatDate, formatDateTime } from "../../../utils/dateUtils";
@@ -21,6 +21,7 @@ import { validateAttachments } from '../../../utils/attachmentHelper';
 import { RejectIncidentModal } from "../components/RejectIncidentModal";
 import { startOfTomorrow } from "date-fns";
 import { useBarangayMembers } from "../../../hooks/useBarangays";
+import { useUserRole } from "../../../hooks/useUserRole";
 
 const btnBase =
   "inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md border transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed";
@@ -109,9 +110,11 @@ export const IncidentDetails: React.FC = () => {
   const navigate = useNavigate();
 
   const { incident, isLoading, error } = useIncidentDetails(Number(incidentId));
-  const { members: barangayMembers } = useBarangayMembers(incident?.barangay?.id);
+  const { isBarangayMember } = useUserRole();
+  const { members: barangayMembers } = useBarangayMembers(isBarangayMember ? undefined : incident?.barangay?.id, true);
 
   const resolveIncidentMutation = useResolveIncident(Number(incidentId));
+  const unresolvableMutation = useMarkIncidentUnresolvable(Number(incidentId));
   const reviewIncidentMutation = useReviewIncident(Number(incidentId));
   const forwardToLguMutation = useForwardIncidentToLgu(Number(incidentId));
   const rejectIncidentMutation = useRejectIncident(Number(incidentId));
@@ -371,7 +374,7 @@ export const IncidentDetails: React.FC = () => {
   }, [markHearingMutation.isError]);
 
   const handleViewAllComplaints = () => {
-    navigate(`/dashboard/incidents/${incidentId}/complaints`);
+    navigate(`${isBarangayMember ? "/member" : "/dashboard"}/incidents/${incidentId}/complaints`);
   };
 
   const handleResolve = () => {
@@ -388,8 +391,44 @@ export const IncidentDetails: React.FC = () => {
         }
 
         actionsTakenModal.setIsLoading(true);
-        await resolveIncidentMutation.mutateAsync({ actions_taken: actionsTaken, attachments, barangay_member_ids: barangayMemberIds });
-        actionsTakenModal.setIsLoading(false);
+        try {
+          await resolveIncidentMutation.mutateAsync({
+            actions_taken: actionsTaken,
+            attachments,
+            ...(isBarangayMember ? {} : { barangay_member_ids: barangayMemberIds }),
+          });
+        } finally {
+          actionsTakenModal.setIsLoading(false);
+        }
+      },
+    });
+  };
+
+  const handleMarkUnresolvable = () => {
+    confirmationModal.openModal({
+      title: "Mark Incident Unresolvable?",
+      message: "This will mark the assigned incident as not resolvable and return it to the Barangay Official for further action.",
+      confirmText: "Mark Unresolvable",
+      confirmColor: "red",
+      onConfirm: async () => {
+        try {
+          await unresolvableMutation.mutateAsync();
+          confirmationModal.closeModal();
+          setSuccessModal({
+            isOpen: true,
+            title: "Incident Updated",
+            message: "The incident has been marked as unresolvable.",
+            shouldNavigateOnClose: false,
+          });
+        } catch (mutationError) {
+          confirmationModal.closeModal();
+          const apiError = mutationError as { response?: { data?: { detail?: string } } };
+          setErrorModal({
+            isOpen: true,
+            title: "Unable to Update Incident",
+            message: apiError.response?.data?.detail || "Failed to mark the incident as unresolvable. Please try again.",
+          });
+        }
       },
     });
   };
@@ -569,6 +608,10 @@ export const IncidentDetails: React.FC = () => {
   const isForwardedToLgu = incidentStatus === "forwarded_to_lgu";
   const isRejectedByLgu = incident.complaint_clusters[0]?.complaint?.is_rejected_by_lgu === true;
   const isRejected = incident.complaint_clusters[0]?.complaint?.status === "rejected"
+  const isResolvable = incident.is_resolvable !== false;
+  const isAssignedAwaitingMemberDecision = !isBarangayMember
+    && isResolvable
+    && incident.complaint_clusters.some((cluster) => cluster.complaint?.status === "reviewed_by_barangay");
 
   const incidentHearingDateRaw = (incident as any)?.hearing_date ?? (incident as any)?.hearingDate ?? null;
   const incidentHearingDate =
@@ -613,7 +656,7 @@ export const IncidentDetails: React.FC = () => {
       {/* Top bar */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => navigate("/dashboard/incidents")}
+          onClick={() => navigate(isBarangayMember ? "/member/assigned-incidents" : "/dashboard/incidents")}
           className="inline-flex items-center gap-1.5 text-sm border border-green-300 bg-green-500 rounded-md px-3 py-2 text-white hover:text-white-900 hover:bg-green-600 transition-colors cursor-pointer"
         >
           <ArrowLeft size={16} />
@@ -654,7 +697,7 @@ export const IncidentDetails: React.FC = () => {
         </div>
 
         {hasLocation && (
-          <button onClick={() => navigate(`/dashboard/incidents/${incident.id}/tracking`)} className={btnGreen}>
+          <button onClick={() => navigate(`${isBarangayMember ? "/member" : "/dashboard"}/incidents/${incident.id}/tracking`)} className={btnGreen}>
             <MapPin size={15} />
             View Incident Location
           </button>
@@ -783,26 +826,40 @@ export const IncidentDetails: React.FC = () => {
                     {assignedMembers.length > 0 && (
                       <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-600">
                         <UserRound className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        {t('incidents.details.assignedTo')}: {assignedMembers.map((member: any) => member.name).join(", ")}
+                        {t('incidents.details.assignedTo')}: {assignedMembers.map((member: any) => `${member.name} (${member.position})`).join(", ")}
                       </p>
                     )}
-
-                    <div className="mt-2 flex items-center justify-between gap-3">
-                      
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
-                        <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        {getResponseAuthorName(response, incident)}
-                      </p>
-                      <p className="text-xs text-slate-400">
-  {formatDateTime(response.response_date, {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: undefined,
-    minute: undefined,
-  })}
-</p>
-                    </div>
+                    {response.user?.role === "barangay_member" ? (
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <p className="flex items-center gap-1.5 text-sm text-slate-600">
+                          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          {incident.barangay?.barangay_name
+                            ? `Barangay ${incident.barangay.barangay_name}`
+                            : "Barangay"}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {formatDateTime(response.response_date, {
+                            year: 'numeric',
+                            month: 'numeric',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <p className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
+                          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          {getResponseAuthorName(response, incident)}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {formatDateTime(response.response_date, {
+                            year: 'numeric',
+                            month: 'numeric',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -813,79 +870,114 @@ export const IncidentDetails: React.FC = () => {
 
       {/* Action bar card: incident actions and hearing controls in one place */}
       {shouldShowHearingControls && (
-        <div className={`${card} flex flex-wrap items-center justify-between gap-3`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleReview}
-              disabled={isUnderReviewByBarangay || isUnderReviewByLgu || reviewIncidentMutation.isPending || isForwardedToLgu || isResolved || isRejectedByLgu}
-              className={btnYellow}
-            >
-              {reviewIncidentMutation.isPending ? "Reviewing..." : "Mark for review"}
-            </button>
-            <button
-              onClick={handleForwardToLgu}
-              disabled={forwardToLguMutation.isPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejectedByLgu || isRejected}
-              className={btnBlue}
-            >
-              {forwardToLguMutation.isPending ? "Forwarding..." : "Escalate to LGU"}
-            </button>
-            <button
-              onClick={handleReject}
-              disabled={!isUnderReviewByBarangay || isForwardedToLgu || rejectIncidentMutation.isPending || isResolved || isRejected}
-              className={btnDanger}
-            >
-              {rejectIncidentMutation.isPending ? "Rejecting..." : "Reject"}
-            </button>
-            
-            <button
-              onClick={handleResolve}
-              disabled={isUnderReviewByLgu || resolveIncidentMutation.isPending || isSubmitted || isResolved || isForwardedToLgu || isRejected}
-              className={btnSolid}
-            >
-              {resolveIncidentMutation.isPending ? "Resolving..." : "Resolve"}
-            </button>
-          </div>
+        <div className={`${card} flex flex-col gap-3`}>
+          {isAssignedAwaitingMemberDecision && (
+            <p className="text-sm text-amber-800">
+              This incident has been assigned to a Barangay Member. Please wait for their decision on whether it can be resolved.
+            </p>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {isBarangayMember ? (
+                <>
+                  {isResolvable ? (
+                    <>
+                      <button
+                        onClick={handleResolve}
+                        disabled={resolveIncidentMutation.isPending}
+                        className={btnSolid}
+                      >
+                        {resolveIncidentMutation.isPending ? "Resolving..." : "Resolve incident"}
+                      </button>
+                      <button
+                        onClick={handleMarkUnresolvable}
+                        disabled={unresolvableMutation.isPending}
+                        className={btnDanger}
+                      >
+                        {unresolvableMutation.isPending ? "Updating..." : "Unresolvable"}
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-600">This incident has been marked as unresolvable.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleReview}
+                    disabled={isUnderReviewByBarangay || isUnderReviewByLgu || reviewIncidentMutation.isPending || isForwardedToLgu || isResolved || isRejectedByLgu}
+                    className={btnYellow}
+                  >
+                    {reviewIncidentMutation.isPending ? "Reviewing..." : "Mark for review"}
+                  </button>
+                  <button
+                    onClick={handleForwardToLgu}
+                    disabled={forwardToLguMutation.isPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejectedByLgu || isRejected || isAssignedAwaitingMemberDecision}
+                    className={btnBlue}
+                  >
+                    {forwardToLguMutation.isPending ? "Forwarding..." : "Escalate to LGU"}
+                  </button>
+                  <button
+                    onClick={handleReject}
+                    disabled={!isUnderReviewByBarangay || isForwardedToLgu || rejectIncidentMutation.isPending || isResolved || isRejected || isAssignedAwaitingMemberDecision}
+                    className={btnDanger}
+                  >
+                    {rejectIncidentMutation.isPending ? "Rejecting..." : "Reject"}
+                  </button>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {hasScheduledHearingDate && (
-              <>
-                <button
-                  onClick={() => handleMarkHearingOutcome(true)}
-                  disabled={markHearingMutation.isPending || hearingOutcome !== null}
-                  className={btnOutline}
-                >
-                  {markHearingMutation.isPending ? 'Updating...' : 'Hearing successful'}
-                </button>
-                <button
-                  onClick={() => handleMarkHearingOutcome(false)}
-                  disabled={markHearingMutation.isPending || hearingOutcome !== null}
-                  className={btnDanger}
-                >
-                  {markHearingMutation.isPending ? 'Updating...' : 'Hearing unsuccessful'}
-                </button>
-              </>
-            )}
+                  <button
+                    onClick={handleResolve}
+                    disabled={isUnderReviewByLgu || resolveIncidentMutation.isPending || isSubmitted || isResolved || isForwardedToLgu || isRejected || isAssignedAwaitingMemberDecision}
+                    className={btnSolid}
+                  >
+                    {resolveIncidentMutation.isPending ? "Resolving..." : "Resolve"}
+                  </button>
+                </>
+              )}
+            </div>
+            {!isBarangayMember && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {hasScheduledHearingDate && (
+                  <>
+                    <button
+                      onClick={() => handleMarkHearingOutcome(true)}
+                      disabled={markHearingMutation.isPending || hearingOutcome !== null}
+                      className={btnOutline}
+                    >
+                      {markHearingMutation.isPending ? 'Updating...' : 'Hearing successful'}
+                    </button>
+                    <button
+                      onClick={() => handleMarkHearingOutcome(false)}
+                      disabled={markHearingMutation.isPending || hearingOutcome !== null}
+                      className={btnDanger}
+                    >
+                      {markHearingMutation.isPending ? 'Updating...' : 'Hearing unsuccessful'}
+                    </button>
+                  </>
+                )}
 
-            {!hasScheduledHearingDate && (
-              <button
-                onClick={() => handleOpenHearingModal('notify')}
-                disabled={isHearingMutationPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejected}
-                className={btnOutline}
-              >
-                <CalendarIcon size={15} />
-                {isHearingMutationPending ? 'Notifying...' : 'Notify for hearing'}
-              </button>
-            )}
+                {!hasScheduledHearingDate && (
+                  <button
+                    onClick={() => handleOpenHearingModal('notify')}
+                    disabled={isHearingMutationPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejected || isAssignedAwaitingMemberDecision}
+                    className={btnOutline}
+                  >
+                    <CalendarIcon size={15} />
+                    {isHearingMutationPending ? 'Notifying...' : 'Notify for hearing'}
+                  </button>
+                )}
 
-            {canScheduleFollowUpHearing && (
-              <button
-                onClick={() => handleOpenHearingModal('reschedule')}
-                disabled={isHearingMutationPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejected}
-                className={btnOutline}
-              >
-                <CalendarIcon size={15} />
-                {isHearingMutationPending ? 'Rescheduling...' : 'Schedule new hearing'}
-              </button>
+                {canScheduleFollowUpHearing && (
+                  <button
+                    onClick={() => handleOpenHearingModal('reschedule')}
+                    disabled={isHearingMutationPending || isSubmitted || isResolved || isUnderReviewByLgu || isForwardedToLgu || isRejected || isAssignedAwaitingMemberDecision}
+                    className={btnOutline}
+                  >
+                    <CalendarIcon size={15} />
+                    {isHearingMutationPending ? 'Rescheduling...' : 'Schedule new hearing'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -908,7 +1000,7 @@ export const IncidentDetails: React.FC = () => {
         onCancel={actionsTakenModal.cancelModal}
         isLoading={actionsTakenModal.isLoading}
         externalError={attachmentError}
-        barangayMembers={barangayMembers}
+        barangayMembers={isBarangayMember ? [] : barangayMembers}
       />
 
       <RejectIncidentModal
@@ -1082,7 +1174,7 @@ export const IncidentDetails: React.FC = () => {
         message={successModal.message}
         onClose={() => {
           if (successModal.shouldNavigateOnClose !== false) {
-            navigate(`/dashboard/incidents`);
+            navigate(isBarangayMember ? "/member/assigned-incidents" : "/dashboard/incidents");
           }
           setSuccessModal({ isOpen: false, title: '', message: '' });
         }}

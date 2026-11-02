@@ -50,6 +50,7 @@ class Complaint(Base):
     notifications = relationship("Notification", back_populates="complaint")
     logs = relationship("ComplaintLogs", back_populates="complaint", cascade="all, delete-orphan")
     rejection_category = relationship("RejectionCategory", back_populates="complaint")
+    referrals = relationship("CaseReferral", back_populates="complaint")
     barangay_members = relationship(
         "BarangayMember",
         secondary=complaint_barangay_members,

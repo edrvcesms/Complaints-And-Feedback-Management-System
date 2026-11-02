@@ -9,10 +9,11 @@ export const useUserRole = () => {
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
 
   const isBarangayOfficial = userRole === 'barangay_official';
+  const isBarangayMember = userRole === 'barangay_member';
   const isLguOfficial = userRole === 'lgu_official';
   const isSuperAdmin = userRole === 'superadmin';
   
-  const isValidRole = isBarangayOfficial || isLguOfficial || isSuperAdmin;
+  const isValidRole = isBarangayOfficial || isBarangayMember || isLguOfficial || isSuperAdmin;
   const hasInvalidRole = !isValidRole;
 
   const getUserData = () => {
@@ -32,6 +33,9 @@ export const useUserRole = () => {
         ? `${user.first_name} ${user.last_name || ''}`.trim()
         : barangayAccountData?.barangay_name || 'Barangay Official';
     }
+    if (isBarangayMember) {
+      return 'Barangay Member';
+    }
     if (isLguOfficial) {
       return 'LGU Official';
     }
@@ -44,6 +48,7 @@ export const useUserRole = () => {
   return {
     userRole,
     isBarangayOfficial,
+    isBarangayMember,
     isLguOfficial,
     isSuperAdmin,
     isAuthenticated,

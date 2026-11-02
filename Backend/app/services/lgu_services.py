@@ -1,32 +1,19 @@
-from fastapi import HTTPException, UploadFile, status
-from datetime import datetime, timezone
+from fastapi import HTTPException, status
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from app.models.incident_model import IncidentModel
 from app.models.incident_complaint import IncidentComplaintModel
-from app.models.response import Response
 from app.schemas.incident_schema import IncidentData
 from app.utils.caching import set_cache, get_cache
 from app.utils.logger import logger
 from app.constants.complaint_status import ComplaintStatus
-from app.utils.cache_invalidator_optimized import invalidate_cache
-from app.utils.cache_invalidator_optimized import CacheInvalidator
-from app.tasks.notification_tasks import send_notifications_task
-from app.models.response import Response
-from app.services.attachment_services import enqueue_response_attachments
-from fastapi.responses import JSONResponse
-from app.schemas.response_schema import ResponseCreateSchema
 from app.models.complaint import Complaint
 from app.models.barangay import Barangay
 from app.models.category import Category
 from app.models.complaint_logs import ComplaintLogs
-from sqlalchemy import select, func, update
-from sqlalchemy import func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func
 from app.constants.complaint_status import ComplaintStatus
-from typing import List
-from app.services.complaint_services import log_status_change
-from app.utils.query_optimization import QueryOptions, BatchLoader, StatisticsHelper
+from app.utils.query_optimization import QueryOptions
 from app.core.pagination import paginate
 from app.core.pagination_params import IncidentListParams
 from app.core.pagination_response import PaginatedResponse

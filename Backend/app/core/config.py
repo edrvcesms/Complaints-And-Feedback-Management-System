@@ -1,5 +1,7 @@
 
 import os
+# from dotenv import load_dotenv
+# load_dotenv()
 class Settings:
     DATABASE_URL_ASYNC: str = os.getenv("DATABASE_URL_ASYNC")
     DATABASE_URL_SYNC: str = os.getenv("DATABASE_URL_SYNC")

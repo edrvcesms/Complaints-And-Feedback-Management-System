@@ -27,3 +27,5 @@ from .push_token import PushToken
 from .user_device import UserDevice
 from .push_subscriptions import PushSubscription
 from .barangay_members import BarangayMember
+from .department import Department
+from .case_referrals import CaseReferral
