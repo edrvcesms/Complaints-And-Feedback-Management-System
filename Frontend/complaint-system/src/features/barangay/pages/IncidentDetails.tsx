@@ -475,6 +475,7 @@ export const IncidentDetails: React.FC = () => {
       description: "Please provide any relevant notes or instructions for the LGU when endorsing this incident.",
       confirmText: "Escalate",
       confirmColor: "blue",
+      showBarangayMembers: false,
       onConfirm: async (actionsTaken: string, attachments: File[]) => {
         actionsTakenModal.setIsLoading(true);
         try {
@@ -1001,6 +1002,7 @@ export const IncidentDetails: React.FC = () => {
         isLoading={actionsTakenModal.isLoading}
         externalError={attachmentError}
         barangayMembers={isBarangayMember ? [] : barangayMembers}
+        showBarangayMembers={actionsTakenModal.showBarangayMembers}
       />
 
       <RejectIncidentModal

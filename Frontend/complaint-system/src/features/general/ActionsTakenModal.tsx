@@ -17,6 +17,7 @@ interface ActionsTakenModalProps {
   description?: string;
   externalError?: string;
   barangayMembers?: Array<{ id: number; name: string; position: string }>;
+  showBarangayMembers?: boolean;
 }
 
 const colorClasses = {
@@ -37,6 +38,7 @@ export const ActionsTakenModal: React.FC<ActionsTakenModalProps> = ({
   description,
   externalError,
   barangayMembers = [],
+  showBarangayMembers = true,
 }) => {
   const { t } = useTranslation();
   const [actionsTaken, setActionsTaken] = useState("");
@@ -127,7 +129,7 @@ export const ActionsTakenModal: React.FC<ActionsTakenModalProps> = ({
           {description && (
             <p className="text-sm text-gray-600 mb-2">{description}</p>
           )}
-          {barangayMembers.length > 0 && (
+          {showBarangayMembers && barangayMembers.length > 0 && (
             <div className="mb-3">
               <label className="block text-sm font-medium text-gray-700 mb-2">Responsible Barangay Member</label>
               <BarangayMemberDropdown

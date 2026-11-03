@@ -9,6 +9,7 @@ interface ActionsTakenModalState {
   onConfirm: (actionsTaken: string, attachments: File[], barangayMemberIds: number[]) => void;
   onCancel?: () => void;
   isLoading: boolean;
+  showBarangayMembers: boolean;
 }
 
 export function useActionsTakenModal() {
@@ -21,6 +22,7 @@ export function useActionsTakenModal() {
     onConfirm: () => {},
     onCancel: undefined,
     isLoading: false,
+    showBarangayMembers: true,
   });
 
   const openModal = useCallback(
@@ -31,6 +33,7 @@ export function useActionsTakenModal() {
       onConfirm,
       onCancel,
       description,
+      showBarangayMembers = true,
     }: {
       title: string;
       confirmText: string;
@@ -38,6 +41,7 @@ export function useActionsTakenModal() {
       onConfirm: (actionsTaken: string, attachments: File[], barangayMemberIds: number[]) => void;
       onCancel?: () => void;
       description?: string;
+      showBarangayMembers?: boolean;
     }) => {
       setState((prev) => ({
         ...prev,
@@ -48,6 +52,7 @@ export function useActionsTakenModal() {
         onConfirm,
         onCancel,
         description,
+        showBarangayMembers,
       }));
     },
     []
@@ -86,6 +91,7 @@ export function useActionsTakenModal() {
     confirmColor: state.confirmColor,
     isLoading: state.isLoading,
     description: state.description,
+    showBarangayMembers: state.showBarangayMembers,
 
     setIsLoading,
     openModal,
