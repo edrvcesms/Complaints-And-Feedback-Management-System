@@ -14,7 +14,7 @@ import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import "leaflet/dist/leaflet.css";
 
 type Coordinates = { latitude: number; longitude: number };
-type TrackingState = "requesting" | "tracking" | "denied" | "unavailable" | "error" | "stopped";
+type TrackingState = "requesting" | "tracking" | "monitoring" | "denied" | "unavailable" | "error" | "stopped";
 
 const ROUTE_REFRESH_DISTANCE_METERS = 100;
 const DEVICE_LOCATION_REFRESH_INTERVAL_MS = 15_000;
@@ -157,6 +157,12 @@ export const IncidentTrackingPage: React.FC = () => {
         })),
     [destination, onDutyLocations],
   );
+  const liveOnDutyMemberCount = useMemo(
+    () => onDutyLocations.filter(({ coordinates, freshness }) => (
+      coordinates && freshness >= 0 && freshness <= LOCATION_FRESHNESS_LIMIT_MS
+    )).length,
+    [onDutyLocations],
+  );
   const closestMember = membersByDistance.find((entry) => entry.coordinates && entry.isFresh && entry.distance !== null);
 
   useEffect(() => {
@@ -258,8 +264,12 @@ export const IncidentTrackingPage: React.FC = () => {
           setTrackingState("error");
           setMessage("Unable to check on-duty members. Your location was not requested.");
         } else {
-          setTrackingState("tracking");
-          setMessage("On-duty members are shown. Your location is not being requested.");
+          setTrackingState("monitoring");
+          setMessage(
+            liveOnDutyMemberCount > 0
+              ? `${liveOnDutyMemberCount} on-duty member${liveOnDutyMemberCount === 1 ? "" : "s"} ${liveOnDutyMemberCount === 1 ? "is" : "are"} sharing a live mobile location.`
+              : "On-duty members are listed, but no live mobile location is available yet.",
+          );
         }
       }
       return;
@@ -310,6 +320,7 @@ export const IncidentTrackingPage: React.FC = () => {
     destination,
     handlePosition,
     isBarangayOfficial,
+    liveOnDutyMemberCount,
     onDutyMembers.length,
     onDutyMembersError,
     shouldTrackCurrentLocation,
@@ -366,7 +377,7 @@ export const IncidentTrackingPage: React.FC = () => {
           </button>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-slate-900">{incident.title}</p>
-            <p className={`mt-1 text-xs ${trackingState === "tracking" ? "text-green-700" : "text-amber-700"}`}>{message}</p>
+            <p className={`mt-1 text-xs ${trackingState === "tracking" || trackingState === "monitoring" ? "text-green-700" : "text-amber-700"}`}>{message}</p>
             {distance !== null && <p className="mt-1 text-sm font-semibold text-slate-900">Distance: {formatDistance(distance)}</p>}
           </div>
         </div>

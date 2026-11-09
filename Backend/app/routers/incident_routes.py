@@ -163,6 +163,8 @@ async def resolve_incident_complaints(
 async def mark_incident_unresolvable(
     request: Request,
     incident_id: int,
+    response: str = Form(...),
+    attachments: List[UploadFile] = File(...),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -173,6 +175,9 @@ async def mark_incident_unresolvable(
         incident_id,
         db,
         barangay_member_id=current_user.barangay_member.id,
+        responder_id=current_user.id,
+        response=response,
+        attachments=attachments,
     )
 
 @router.patch("/{incident_id}/review", status_code=status.HTTP_200_OK)

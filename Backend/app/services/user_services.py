@@ -251,9 +251,23 @@ async def update_user_location(user_id: int, location_data: UserLocationData, db
         
         user.latitude = str(latitude)
         user.longitude = str(longitude)
-        user.location_updated_at = datetime.now(timezone.utc)
 
         if user.role == UserRole.BARANGAY_MEMBER.value:
+            barangay_info = get_barangay(latitude, longitude)
+            if not barangay_info:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unable to determine a Santa Maria barangay from the provided location.",
+                )
+
+            user.barangay = barangay_info["name"]
+            full_address_info = await reverse_geocode(
+                latitude,
+                longitude,
+                user.barangay,
+            )
+            user.full_address = full_address_info.get("display_name", "Unknown Location")
+            user.location_updated_at = datetime.now(timezone.utc)
             await delete_cache(f"user_profile:{user_id}")
             await delete_cache(f"auth_user:{user_id}")
             await db.commit()
@@ -265,15 +279,16 @@ async def update_user_location(user_id: int, location_data: UserLocationData, db
                 },
             )
 
-        barangay_info = get_barangay(location_data.latitude, location_data.longitude)
+        barangay_info = get_barangay(latitude, longitude)
         if barangay_info:
             user.barangay = barangay_info["name"]
         else:
             user.barangay = None 
         logger.info(f"User ID {user_id} location updated to latitude {user.latitude}, longitude {user.longitude}, barangay {user.barangay}")
         
-        full_address_info = await reverse_geocode(location_data.latitude, location_data.longitude, user.barangay)
+        full_address_info = await reverse_geocode(latitude, longitude, user.barangay)
         user.full_address = full_address_info.get("display_name", "Unknown Location")
+        user.location_updated_at = datetime.now(timezone.utc)
        
         await delete_cache(f"user_profile:{user_id}")
         await delete_cache(f"auth_user:{user_id}")
@@ -409,6 +424,7 @@ async def send_push_notification(
                 "body": body,
                 "data": data or {},
                 "sound": "default",
+                "channelId": "complaint-updates",
                 "priority": "high",
             }
             for token in tokens

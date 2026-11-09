@@ -100,11 +100,6 @@ class QueryOptions:
                 Complaint.user_id,
                 Complaint.category_id,
             ),
-            QueryOptions._category_summary_load(
-                selectinload(IncidentModel.complaint_clusters)
-                .selectinload(IncidentComplaintModel.complaint)
-                .selectinload(Complaint.category)
-            ),
             selectinload(IncidentModel.complaint_clusters)
             .selectinload(IncidentComplaintModel.complaint)
             .selectinload(Complaint.user)
@@ -176,6 +171,11 @@ class QueryOptions:
             Complaint.latitude,
             Complaint.longitude,
         ),
+        QueryOptions._category_summary_load(
+            selectinload(IncidentModel.complaint_clusters)
+            .selectinload(IncidentComplaintModel.complaint)
+            .selectinload(Complaint.category)
+        ),
         selectinload(IncidentModel.complaint_clusters)
         .selectinload(IncidentComplaintModel.complaint)
         .selectinload(Complaint.user)
@@ -222,6 +222,11 @@ class QueryOptions:
                 Complaint.category_id,
                 Complaint.latitude,
                 Complaint.longitude,
+            ),
+            QueryOptions._category_summary_load(
+                selectinload(IncidentModel.complaint_clusters)
+                .selectinload(IncidentComplaintModel.complaint)
+                .selectinload(Complaint.category)
             ),
             selectinload(IncidentModel.complaint_clusters)
             .selectinload(IncidentComplaintModel.complaint)

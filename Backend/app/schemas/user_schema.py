@@ -42,6 +42,7 @@ class UserData(UserBase):
     zip_code: Optional[str] = None
     latitude: Optional[str] = None
     longitude: Optional[str] = None
+    location_updated_at: Optional[datetime] = None
     id_type: Optional[str] = None
     id_number: Optional[str] = None
     clerk_user_id: Optional[str] = None

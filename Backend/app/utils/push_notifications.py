@@ -9,7 +9,6 @@ import requests
 from requests.exceptions import ConnectionError, HTTPError
 from app.utils.logger import logger
 
-
 def send_push_notification(
     token: str,
     enabled: bool,
@@ -17,6 +16,7 @@ def send_push_notification(
     body: str = "",
     data: dict = None,
     sound: str = "default",
+    channel_id: str = "complaint-updates",
     expo_token: str = None,
 ) -> dict:
     if not enabled:
@@ -44,6 +44,7 @@ def send_push_notification(
             body=body,
             data=data or {},
             sound=sound,
+            channel_id=channel_id,
         )
         logger.info(f"Constructed PushMessage: {message.__dict__}")
 

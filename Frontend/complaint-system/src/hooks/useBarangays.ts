@@ -70,7 +70,8 @@ export const useOnDutyBarangayMembers = (barangayId?: number) => {
     enabled: !!barangayId,
     staleTime: 30_000,
     refetchInterval: 60_000,
-    refetchOnWindowFocus: false,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   return {

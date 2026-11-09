@@ -184,9 +184,29 @@ async def mark_incident_as_unresolvable(
     incident_id: int,
     db: AsyncSession,
     barangay_member_id: Optional[int] = None,
+    responder_id: Optional[int] = None,
+    response: str = "",
+    attachments: Optional[List[UploadFile]] = None,
 ):
-    """Mark an incident as unresolvable"""
+    """Mark an incident as unresolvable with a required explanation and evidence."""
     try:
+        response_text = response.strip()
+        if not response_text:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A response is required when marking an incident as unresolvable.",
+            )
+        if not attachments:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="At least one attachment is required when marking an incident as unresolvable.",
+            )
+        if responder_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid responder account is required.",
+            )
+
         result = await db.execute(
             select(IncidentModel)
             .where(IncidentModel.id == incident_id)
@@ -214,7 +234,22 @@ async def mark_incident_as_unresolvable(
         
         newly_marked_unresolvable = incident.is_resolvable is not False
         incident.is_resolvable = False
+
+        response_record = Response(
+            incident_id=incident_id,
+            responder_id=responder_id,
+            actions_taken=response_text,
+            response_date=datetime.now(timezone.utc),
+        )
+        db.add(response_record)
         await db.commit()
+        await db.refresh(response_record)
+        await enqueue_response_attachments(
+            attachments,
+            response_record.id,
+            responder_id,
+            incident_id,
+        )
 
         if newly_marked_unresolvable:
             official_result = await db.execute(
@@ -254,6 +289,8 @@ async def mark_incident_as_unresolvable(
         await CacheInvalidator.invalidate_cache(
             incident_ids=[incident_id],
             barangay_id=incident.barangay_id,
+            response_id=response_record.id,
+            user_ids=[responder_id],
             include_global=True
         )
         

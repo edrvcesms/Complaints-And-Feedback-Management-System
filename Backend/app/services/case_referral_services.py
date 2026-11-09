@@ -434,13 +434,13 @@ async def build_referral_letter_document(referral: CaseReferral, complaint: Comp
         add_paragraph(space_after=14)
 
     add_paragraph("PAGKILALA NG TUMATANGGAP NA TANGGAPAN", bold=True, space_before=8, space_after=5)
-    add_labeled_paragraph("Tinanggap ni", referral.receiving_officer or "________________________________")
+    add_labeled_paragraph("Ipinadala ni", referral.receiving_officer or "________________________________")
     if referral.receiving_officer_position:
         add_labeled_paragraph("Katungkulan", referral.receiving_officer_position)
     else:
         add_labeled_paragraph("Katungkulan", "________________________________")
     add_labeled_paragraph("Petsa at Oras ng Pagtanggap", "________________________________")
-    add_labeled_paragraph("Blg. ng Sanggunian / Pagsubaybay", "________________________________", space_after=0)
+    add_labeled_paragraprah("Blg. ng Sanggunian / Pagsubaybay", "________________________________", space_after=0)
 
     buffer = BytesIO()
     document.save(buffer)

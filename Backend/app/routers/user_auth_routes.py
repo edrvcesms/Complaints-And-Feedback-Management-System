@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.dependencies.auth_dependency import get_current_user
 from app.schemas.user_auth_schema import ClerkLoginRequest, LoginData, UserLoginData, LoginResponse, RegisterData, OTPVerificationData, ResendOtpData
-from app.services.user_auth_services import login_with_google, logout_user, register_user, resend_device_verification_otp, verify_otp_and_register, login_user, refresh_access_token, officials_login, superadmin_login, resend_otp_code, upload_id_images, verify_device_otp, logout_resident
+from app.services.user_auth_services import login_with_google, logout_user, register_user, resend_device_verification_otp, verify_otp_and_register, login_user, refresh_access_token, officials_login, barangay_member_mobile_login, superadmin_login, resend_otp_code, upload_id_images, verify_device_otp, logout_resident
 from slowapi.errors import RateLimitExceeded
 from app.utils.turnstile import verify_turnstile
 from fastapi.requests import Request
@@ -50,6 +50,11 @@ async def login(request: Request, login_data: UserLoginData, db: AsyncSession = 
 async def officials_login_route(request: Request, login_data: LoginData, db: AsyncSession = Depends(get_async_db)):
     await verify_turnstile(login_data.turnstile_token, request, expected_action="official_login")
     return await officials_login(login_data, db)
+
+@router.post("/barangay-member-mobile-login", status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+async def barangay_member_mobile_login_route(request: Request, login_data: LoginData, db: AsyncSession = Depends(get_async_db)):
+    return await barangay_member_mobile_login(login_data, db)
 
 @router.post("/superadmin-login", status_code=status.HTTP_200_OK)
 @limiter.limit("10/minute")

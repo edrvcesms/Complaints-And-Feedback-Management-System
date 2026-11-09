@@ -482,20 +482,12 @@ async def assign_barangay_members_to_complaints(db: AsyncSession, incident_id: i
         push_tokens = await BatchLoader.fetch_push_tokens_by_user_ids(db, member_user_ids)
         notification_title = "New Incident Assignment"
         notification_message = f"Incident #{incident_id}, '{incident_title}', has been assigned to you."
-        from app.tasks.notification_tasks import send_notifications_task, send_push_notification_task
+        from app.tasks.notification_tasks import send_push_notification_task
 
         for member in newly_assigned_members:
             user = users.get(member.user_id)
             if user is None:
                 continue
-
-            send_notifications_task.delay(
-                user_id=member.user_id,
-                title=notification_title,
-                message=notification_message,
-                incident_id=incident_id,
-                notification_type="incident_assigned",
-            )
 
             for push_token in push_tokens.get(member.user_id, []):
                 if push_token.is_active:
@@ -508,6 +500,8 @@ async def assign_barangay_members_to_complaints(db: AsyncSession, incident_id: i
                             "incident_id": incident_id,
                             "notification_type": "incident_assigned",
                         },
+                        sound="alert.mp3",
+                        channel_id="complaint-updates-alert-v2",
                     )
 
         return JSONResponse(status_code=status.HTTP_200_OK, content={"message": "Barangay members assigned to complaints successfully"})

@@ -515,6 +515,69 @@ async def officials_login(login_data: LoginData, db: AsyncSession):
         logger.exception(f"Error during login for {login_data.email}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred during login. Please try again later.")
 
+
+async def barangay_member_mobile_login(login_data: LoginData, db: AsyncSession):
+    """Authenticate a barangay member from the mobile application.
+
+    This endpoint intentionally does not use Turnstile because the mobile
+    application has no browser-based Turnstile challenge. It is restricted to
+    the barangay_member role and does not change the protected web login flow.
+    """
+    try:
+        if login_data.role != UserRole.BARANGAY_MEMBER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only available to barangay members.",
+            )
+
+        result = await db.execute(select(User).where(User.email == login_data.email))
+        user = result.scalars().first()
+
+        if not user:
+            logger.warning(f"Mobile login attempt with unregistered email: {login_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This email is not registered. Please check your email or password.",
+            )
+
+        if not decrypt_password(login_data.password, user.hashed_password):
+            logger.warning(f"Mobile login attempt with incorrect password for email: {login_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+
+        if user.role != UserRole.BARANGAY_MEMBER:
+            logger.warning(f"Mobile login attempt with unauthorized role for email: {login_data.email}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized Access")
+
+        refresh_token = create_refresh_token(data={"user_id": user.id})
+        access_token = create_access_token(data={"user_id": user.id})
+
+        response = JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=jsonable_encoder({
+                "message": "Login successful",
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "role": user.role,
+                "barangayAccountData": None,
+            }),
+        )
+        await set_cookies(response, refresh_token=refresh_token)
+        return response
+
+    except HTTPException:
+        raise
+    except Exception:
+        await db.rollback()
+        logger.exception(f"Error during mobile login for {login_data.email}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during login. Please try again later.",
+        )
+
+
 async def superadmin_login(login_data: LoginData, db: AsyncSession):
     try:
         result = await db.execute(select(User).where(User.email == login_data.email))

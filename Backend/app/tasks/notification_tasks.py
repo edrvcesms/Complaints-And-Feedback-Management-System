@@ -42,6 +42,7 @@ def send_push_notification_task(
     body: str = "",
     data: dict = None,
     sound: str = "default",
+    channel_id: str = "complaint-updates",
     expo_token: str = None,
 ):
     try:
@@ -52,6 +53,7 @@ def send_push_notification_task(
             body=body,
             data=data or {},
             sound=sound,
+            channel_id=channel_id,
             expo_token=expo_token,
         )
         logger.info(f"Push notification task result: {result}")
