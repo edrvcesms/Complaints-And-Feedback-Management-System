@@ -1,6 +1,6 @@
 import maryapp from "../../../assets/maryapp.jpg";
 
-const youtubeVideoUrl = "https://www.youtube.com/embed/ld242E91N7s";
+const youtubeVideoUrl = "https://www.youtube.com/watch?v=rK3Cgc43hzo";
 
 export const UsersGuidePage: React.FC = () => {
   return (
