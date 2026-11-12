@@ -1,6 +1,7 @@
 import maryapp from "../../../assets/maryapp.jpg";
 
-const youtubeVideoUrl = "https://www.youtube.com/watch?v=rK3Cgc43hzo";
+const youtubeVideoUrl = "https://www.youtube.com/embed/rK3Cgc43hzo";
+const youtubeWatchUrl = "https://www.youtube.com/watch?v=rK3Cgc43hzo";
 
 export const UsersGuidePage: React.FC = () => {
   return (
@@ -20,16 +21,22 @@ export const UsersGuidePage: React.FC = () => {
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">A short guide to submitting complaints and following their progress.</p>
 
           <div className="relative mt-8 aspect-video overflow-hidden rounded-lg border border-slate-200 bg-black">
-            {youtubeVideoUrl && (
-              <iframe
-                src={youtubeVideoUrl}
-                title="Mary App user guide video"
-                className="absolute inset-0 h-full w-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
-            )}
+            <iframe
+              src={youtubeVideoUrl}
+              title="Mary App user guide video"
+              className="absolute inset-0 h-full w-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
           </div>
+          <a
+            href={youtubeWatchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-block text-sm font-medium text-[#17643b] underline underline-offset-2"
+          >
+            Watch on YouTube
+          </a>
         </section>
       </div>
     </main>
